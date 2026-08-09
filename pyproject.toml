@@ -1,0 +1,30 @@
+[project]
+name = "claude-workman"
+version = "0.1.0"
+description = "Human-mode desktop control MCP connector for Linux/X11 — see, click, type, and act on the accessibility tree."
+readme = "README.md"
+requires-python = ">=3.10"
+license = { text = "MIT" }
+authors = [{ name = "Atmosphere AI" }]
+keywords = ["mcp", "computer-use", "automation", "accessibility", "at-spi", "x11", "claude"]
+dependencies = [
+    "mcp>=1.2.0",
+]
+
+[project.optional-dependencies]
+# AT-SPI accuracy layer (system packages: gir1.2-atspi-2.0, python3-gi) + Pillow for downscaled screenshots
+extras = ["PyGObject>=3.40", "Pillow>=9.0"]
+
+[project.scripts]
+claude-workman = "workman.server:main"
+
+[project.urls]
+Homepage = "https://github.com/atmosphere-ai/claude-workman"
+Repository = "https://github.com/atmosphere-ai/claude-workman"
+
+[build-system]
+requires = ["setuptools>=61"]
+build-backend = "setuptools.build_meta"
+
+[tool.setuptools]
+packages = ["workman"]
