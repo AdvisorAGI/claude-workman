@@ -29,6 +29,23 @@ def _require(binary: str) -> None:
         raise RuntimeError(f"'{binary}' not found on PATH — install it (Workman needs xdotool + ffmpeg)")
 
 
+_CURSOR_FIFO = os.environ.get("WORKMAN_CURSOR_FIFO", os.path.expanduser("~/.cache/workman/cursor.fifo"))
+
+
+def emit_cursor(kind: str, x: int, y: int) -> None:
+    """Best-effort notify the visual cursor overlay (workman.cursor) of an action.
+    Silent no-op if the overlay daemon isn't running."""
+    try:
+        if os.path.exists(_CURSOR_FIFO):
+            fd = os.open(_CURSOR_FIFO, os.O_WRONLY | os.O_NONBLOCK)
+            try:
+                os.write(fd, f"{kind} {x} {y}\n".encode())
+            finally:
+                os.close(fd)
+    except OSError:
+        pass
+
+
 def screen_size() -> tuple[int, int]:
     _require("xdotool")
     out = _run(["xdotool", "getdisplaygeometry"]).stdout.split()
@@ -114,18 +131,22 @@ def focus_window(query: str, minimize_blockers: bool = True) -> dict:
 
 def click(x: int, y: int, button: int = 1, count: int = 1) -> dict:
     _require("xdotool")
+    emit_cursor("click", x, y)
     _run(["xdotool", "mousemove", str(x), str(y), "click", "--repeat", str(count), str(button)])
     return {"ok": True, "clicked": [x, y], "button": button, "count": count}
 
 
 def move(x: int, y: int) -> dict:
+    emit_cursor("move", x, y)
     _run(["xdotool", "mousemove", str(x), str(y)])
     return {"ok": True, "at": [x, y]}
 
 
 def drag(from_x: int, from_y: int, to_x: int, to_y: int) -> dict:
+    emit_cursor("move", from_x, from_y)
     _run(["xdotool", "mousemove", str(from_x), str(from_y), "mousedown", "1",
           "mousemove", str(to_x), str(to_y), "mouseup", "1"])
+    emit_cursor("click", to_x, to_y)
     return {"ok": True, "from": [from_x, from_y], "to": [to_x, to_y]}
 
 

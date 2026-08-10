@@ -17,6 +17,7 @@ extras = ["PyGObject>=3.40", "Pillow>=9.0"]
 
 [project.scripts]
 claude-workman = "workman.server:main"
+claude-workman-cursor = "workman.cursor:run"
 
 [project.urls]
 Homepage = "https://github.com/atmosphere-ai/claude-workman"

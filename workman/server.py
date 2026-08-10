@@ -106,6 +106,27 @@ def click_element(name: str, role: str | None = None, app: str | None = None) ->
     return atspi.click_element(name, role=role, app=app)
 
 
+@mcp.tool()
+def show_cursor(on: bool = True) -> dict:
+    """Start/stop the visual click cursor overlay — a Codex-style ring + click
+    ripple that shows on the monitor exactly where Workman is acting (for human
+    oversight). Requires GTK (python3-gi). Actions auto-notify it once running."""
+    import subprocess
+    import sys
+    from . import cursor as _cursor
+    if on:
+        _cursor.fifo_path()
+        subprocess.Popen([sys.executable, "-m", "workman.cursor"],
+                         stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL)
+        return {"ok": True, "overlay": "starting", "fifo": _cursor.FIFO}
+    try:
+        with open(_cursor.FIFO, "w") as f:
+            f.write("quit\n")
+    except OSError:
+        pass
+    return {"ok": True, "overlay": "stopped"}
+
+
 def main() -> None:
     mcp.run()
 

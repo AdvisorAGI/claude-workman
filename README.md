@@ -31,6 +31,7 @@ ported to Linux via AT-SPI2 (`gi.repository.Atspi`).
 | `enable_accessibility` | Turn on AT-SPI tree export (and silence the screen reader — see below) |
 | `accessibility_tree` | Actionable elements as `{app, role, name, x, y, w, h}` in screen coords |
 | `click_element` | Find an element by role+name and click its center — no pixel guessing |
+| `show_cursor` | Start/stop a **visual click cursor** overlay — a Codex-style ring + click ripple that shows on the monitor exactly where Workman is acting, for human oversight (needs GTK / python3-gi) |
 
 ## Install
 
