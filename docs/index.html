@@ -1,0 +1,151 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>claude-workman — Computer Use for Linux as an MCP Server</title>
+<meta name="description" content="claude-workman is an open-source MCP server that gives AI assistants human-mode control of a Linux desktop: screenshot, accessibility-tree targeting, click, type, and window control. Works with Claude, Claude Code, and any MCP client.">
+<link rel="canonical" href="https://advisoragi.github.io/claude-workman/">
+<meta name="keywords" content="MCP server, Model Context Protocol, computer use, desktop automation, Linux automation, X11, AT-SPI2, accessibility tree, GUI agent, Claude connector, agentic AI, xdotool">
+<meta name="author" content="Atmosphere AI">
+<meta name="robots" content="index, follow, max-image-preview:large, max-snippet:-1">
+
+<meta property="og:type" content="website">
+<meta property="og:title" content="claude-workman — Computer Use for Linux as an MCP Server">
+<meta property="og:description" content="Open-source MCP server for human-mode Linux desktop control: screenshot, accessibility-tree targeting, click, type. Works with Claude and any MCP client.">
+<meta property="og:url" content="https://advisoragi.github.io/claude-workman/">
+<meta property="og:site_name" content="claude-workman">
+<meta name="twitter:card" content="summary_large_image">
+<meta name="twitter:title" content="claude-workman — Computer Use for Linux as an MCP Server">
+<meta name="twitter:description" content="Open-source MCP server for human-mode Linux desktop control, with accessibility-tree accuracy.">
+
+<script type="application/ld+json">
+{
+  "@context": "https://schema.org",
+  "@graph": [
+    {
+      "@type": "SoftwareApplication",
+      "name": "claude-workman",
+      "applicationCategory": "DeveloperApplication",
+      "operatingSystem": "Linux (X11)",
+      "description": "An open-source Model Context Protocol (MCP) server that gives AI assistants human-mode control of a Linux desktop: it captures a screenshot, reads the AT-SPI2 accessibility tree, then moves the mouse, clicks, types, and switches windows. Clicks are addressed by element role and name rather than guessed pixel coordinates.",
+      "url": "https://github.com/AdvisorAGI/claude-workman",
+      "codeRepository": "https://github.com/AdvisorAGI/claude-workman",
+      "programmingLanguage": "Python",
+      "license": "https://opensource.org/licenses/MIT",
+      "author": { "@type": "Organization", "name": "Atmosphere AI" },
+      "offers": { "@type": "Offer", "price": "0", "priceCurrency": "USD" },
+      "softwareRequirements": "Python 3.10+, xdotool, ffmpeg, python3-gi, gir1.2-atspi-2.0"
+    },
+    {
+      "@type": "FAQPage",
+      "mainEntity": [
+        { "@type": "Question", "name": "What is claude-workman?",
+          "acceptedAnswer": { "@type": "Answer", "text": "claude-workman is an open-source MCP server that lets an AI assistant control a Linux desktop the way a person does — screenshot, locate, click, type, verify — using the AT-SPI2 accessibility tree so clicks hit real UI elements instead of guessed coordinates." } },
+        { "@type": "Question", "name": "How is claude-workman different from browser automation?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Browser tools such as Playwright, Puppeteer or CDP drive a web page. claude-workman drives the whole desktop: native applications, terminals, file managers, settings dialogs and browsers alike." } },
+        { "@type": "Question", "name": "Does claude-workman work with Claude Code?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Yes. Register it with: claude mcp add --scope user workman -- python -m workman.server. It works with any MCP client, not only Claude." } },
+        { "@type": "Question", "name": "Does claude-workman support Wayland or macOS?",
+          "acceptedAnswer": { "@type": "Answer", "text": "Not yet. It targets Linux with X11 today. A Wayland backend and a macOS AXUIElement backend are planned and contributions are welcome." } },
+        { "@type": "Question", "name": "Why is it called Workman?",
+          "acceptedAnswer": { "@type": "Answer", "text": "It is named after the Walkman — a small, portable thing that just plays. Point it at a display and it works." } },
+        { "@type": "Question", "name": "Does claude-workman solve CAPTCHAs?",
+          "acceptedAnswer": { "@type": "Answer", "text": "No. It is a general desktop-control server for automation and accessibility work, not an anti-bot bypass tool." } }
+      ]
+    }
+  ]
+}
+</script>
+<style>
+  :root { color-scheme: light dark; --fg:#111; --dim:#555; --bg:#fff; --acc:#0a63c9; --card:#f6f8fa; --edge:#d8dee4; }
+  @media (prefers-color-scheme: dark) { :root { --fg:#e6edf3; --dim:#9198a1; --bg:#0d1117; --acc:#7dd3fc; --card:#161b22; --edge:#30363d; } }
+  * { box-sizing:border-box }
+  body { margin:0; padding:0 1.25rem 4rem; font:16px/1.65 -apple-system,system-ui,Segoe UI,sans-serif; color:var(--fg); background:var(--bg); }
+  main { max-width:52rem; margin:0 auto }
+  h1 { font-size:2.1rem; margin:2.5rem 0 .5rem; letter-spacing:-.02em }
+  h2 { font-size:1.35rem; margin:2.5rem 0 .75rem; border-bottom:1px solid var(--edge); padding-bottom:.35rem }
+  h3 { font-size:1.05rem; margin:1.5rem 0 .35rem }
+  .lede { font-size:1.1rem; color:var(--dim) }
+  a { color:var(--acc) }
+  pre { background:var(--card); border:1px solid var(--edge); border-radius:8px; padding:.9rem 1rem; overflow-x:auto }
+  code { font-family:ui-monospace,SFMono-Regular,Menlo,monospace; font-size:.9em }
+  table { border-collapse:collapse; width:100%; display:block; overflow-x:auto }
+  th,td { text-align:left; padding:.5rem .7rem; border-bottom:1px solid var(--edge) }
+  .pills a { display:inline-block; background:var(--card); border:1px solid var(--edge); border-radius:999px; padding:.25rem .8rem; margin:.2rem .3rem .2rem 0; text-decoration:none; font-size:.85rem }
+  footer { margin-top:3rem; color:var(--dim); font-size:.9rem }
+</style>
+</head>
+<body>
+<main>
+  <h1>claude-workman</h1>
+  <p class="lede"><strong>Computer use for Linux, as an MCP server.</strong> It gives an AI assistant
+  human-mode control of a desktop — screenshot, read the accessibility tree, then move the mouse,
+  click, type, and switch windows. Works with Claude, Claude Code, and any MCP client.</p>
+
+  <p class="pills">
+    <a href="https://github.com/AdvisorAGI/claude-workman">GitHub repository</a>
+    <a href="https://modelcontextprotocol.io">Model Context Protocol</a>
+    <a href="https://github.com/AdvisorAGI/claude-workman/blob/main/LICENSE">MIT license</a>
+  </p>
+
+  <h2>Install</h2>
+<pre><code>sudo apt install xdotool ffmpeg gir1.2-atspi-2.0 python3-gi
+pip install claude-workman
+claude mcp add --scope user workman -- python -m workman.server</code></pre>
+
+  <h2>Why accessibility-tree clicking beats pixel clicking</h2>
+  <p>Most desktop automation guesses pixel coordinates and breaks when a layout shifts.
+  claude-workman fuses a screenshot with the AT-SPI2 accessibility tree, so an action can be
+  addressed semantically — <em>“click the push button named Continue”</em> — and land on that
+  button wherever it moved. It is the same principle as macOS AXUIElement-based computer use,
+  ported to Linux.</p>
+
+  <table>
+    <thead><tr><th>Approach</th><th>Addressing</th><th>Survives layout change</th></tr></thead>
+    <tbody>
+      <tr><td>Pixel-only automation</td><td>guessed x, y</td><td>No — brittle</td></tr>
+      <tr><td><strong>Accessibility-tree automation</strong></td><td>role + name → element</td><td>Yes — robust</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Tools</h2>
+  <table>
+    <tbody>
+      <tr><td><code>screenshot</code>, <code>screenshot_region</code></td><td>Capture the display or a sub-rectangle as PNG</td></tr>
+      <tr><td><code>accessibility_tree</code></td><td>Actionable elements with role, name and screen coordinates</td></tr>
+      <tr><td><code>click_element</code></td><td>Find an element by role and name, click its center</td></tr>
+      <tr><td><code>enable_accessibility</code></td><td>Enable AT-SPI export and silence the screen reader</td></tr>
+      <tr><td><code>list_windows</code>, <code>focus_window</code></td><td>Enumerate and raise windows</td></tr>
+      <tr><td><code>click</code>, <code>move</code>, <code>drag</code>, <code>scroll</code></td><td>Pointer actions</td></tr>
+      <tr><td><code>type_text</code>, <code>press_key</code></td><td>Keyboard input (xdotool key syntax)</td></tr>
+      <tr><td><code>show_cursor</code></td><td>Visual click cursor overlay for human oversight</td></tr>
+    </tbody>
+  </table>
+
+  <h2>Frequently asked questions</h2>
+  <h3>What is claude-workman?</h3>
+  <p>An open-source MCP server that lets an AI assistant control a Linux desktop the way a person
+  does — screenshot, locate, click, type, verify — with accessibility-tree targeting so clicks hit
+  real UI elements instead of guessed coordinates.</p>
+  <h3>How is this different from browser automation?</h3>
+  <p>Playwright, Puppeteer and CDP drive a web page. claude-workman drives the whole desktop:
+  native apps, terminals, file managers, settings dialogs, and browsers alike.</p>
+  <h3>Does it work with Claude Code?</h3>
+  <p>Yes — <code>claude mcp add --scope user workman -- python -m workman.server</code>. It works
+  with any MCP client, not only Claude.</p>
+  <h3>Does it support Wayland or macOS?</h3>
+  <p>Not yet — X11 today. A Wayland backend and a macOS AXUIElement backend are planned.</p>
+  <h3>Is it safe to let an agent control my desktop?</h3>
+  <p>Treat it like handing over mouse and keyboard. Use <code>show_cursor</code> to see every
+  action, prefer a dedicated display or VM for unattended runs, and verify by screenshot before
+  anything irreversible.</p>
+  <h3>Does it solve CAPTCHAs?</h3>
+  <p>No. It is a general desktop-control server, not an anti-bot bypass tool.</p>
+
+  <footer>MIT licensed · © 2026 Atmosphere AI ·
+    <a href="https://github.com/AdvisorAGI/claude-workman">github.com/AdvisorAGI/claude-workman</a>
+  </footer>
+</main>
+</body>
+</html>

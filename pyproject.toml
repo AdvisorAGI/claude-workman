@@ -20,8 +20,8 @@ claude-workman = "workman.server:main"
 claude-workman-cursor = "workman.cursor:run"
 
 [project.urls]
-Homepage = "https://github.com/atmosphere-ai/claude-workman"
-Repository = "https://github.com/atmosphere-ai/claude-workman"
+Homepage = "https://github.com/AdvisorAGI/claude-workman"
+Repository = "https://github.com/AdvisorAGI/claude-workman"
 
 [build-system]
 requires = ["setuptools>=61"]

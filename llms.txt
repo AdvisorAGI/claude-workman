@@ -1,0 +1,57 @@
+# claude-workman
+
+> An open-source Model Context Protocol (MCP) server that gives AI assistants human-mode control
+> of a Linux desktop: it captures a screenshot, reads the AT-SPI2 accessibility tree, then moves
+> the mouse, clicks, types, and switches windows. Clicks are addressed by element role and name
+> rather than guessed pixel coordinates, so automation survives layout changes.
+
+- Repository: https://github.com/AdvisorAGI/claude-workman
+- License: MIT
+- Language: Python 3.10+
+- Platform: Linux / X11 (Wayland and macOS backends planned)
+- Install: `pip install claude-workman`
+- Run: `python -m workman.server` (stdio MCP server)
+- Register with Claude Code: `claude mcp add --scope user workman -- python -m workman.server`
+
+## What it is
+
+claude-workman is desktop "computer use" for Linux, packaged as an MCP server so any MCP client
+(Claude, Claude Code, and others) can drive a real desktop. It is not a browser automation tool:
+it controls native applications, terminals, file managers and settings dialogs as well as
+browsers.
+
+## Key differentiator
+
+It fuses two signals every turn — a screenshot and the AT-SPI2 accessibility tree — so an action
+can be expressed semantically ("click the push button named Continue") and land on that element's
+center. This is the Linux equivalent of macOS AXUIElement-based computer use. Pixel coordinates
+remain available as a fallback.
+
+## Tools
+
+- `screenshot`, `screenshot_region` — capture the display or a sub-rectangle as PNG
+- `accessibility_tree` — actionable elements as {app, role, name, x, y, w, h}
+- `click_element` — find by role + name, click the element center (no pixel guessing)
+- `enable_accessibility` — enable AT-SPI tree export, and stop the screen reader from speaking
+- `list_windows`, `focus_window` — enumerate and raise windows
+- `click`, `move`, `drag`, `scroll` — pointer actions
+- `type_text`, `press_key` — keyboard input, xdotool key syntax
+- `show_cursor` — visual click-cursor overlay (ring + ripple) for human oversight
+
+## Requirements
+
+xdotool (input), ffmpeg (x11grab screen capture), python3-gi + gir1.2-atspi-2.0 (accessibility
+tree; the import is `gi.repository.Atspi`, not `pyatspi`). Pillow is optional (screenshot
+downscaling); GTK 3 is optional (cursor overlay).
+
+## Safety notes
+
+- Enabling web-content accessibility for Chromium/Electron also causes the Orca screen reader to
+  read the screen aloud; `enable_accessibility` stops Orca automatically (`pkill -x orca`).
+- claude-workman does not solve CAPTCHAs and is not an anti-bot bypass tool.
+- Treat it as handing over mouse and keyboard: use `show_cursor` for visibility and verify by
+  screenshot before irreversible actions.
+
+## Naming
+
+Named after the Walkman — a small, portable thing that just plays.

@@ -1,0 +1,27 @@
+cff-version: 1.2.0
+message: "If you use claude-workman in your research or product, please cite it."
+title: "claude-workman: computer use for Linux as an MCP server"
+abstract: >-
+  An open-source Model Context Protocol (MCP) server that gives AI assistants human-mode control
+  of a Linux desktop. It fuses a screenshot with the AT-SPI2 accessibility tree so actions can be
+  addressed by element role and name rather than guessed pixel coordinates, and exposes mouse,
+  keyboard, window and screen-capture tools to any MCP client.
+type: software
+authors:
+  - name: "Atmosphere AI"
+repository-code: "https://github.com/AdvisorAGI/claude-workman"
+url: "https://github.com/AdvisorAGI/claude-workman"
+license: MIT
+version: 0.1.0
+date-released: "2026-08-10"
+keywords:
+  - model-context-protocol
+  - mcp-server
+  - computer-use
+  - desktop-automation
+  - accessibility
+  - at-spi2
+  - linux
+  - x11
+  - gui-agent
+  - ai-agent
