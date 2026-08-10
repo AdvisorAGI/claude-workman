@@ -25,9 +25,14 @@ ACCENT = (0.20, 0.61, 1.0)  # #339cff, Codex-like cyan-blue
 
 
 def fifo_path() -> str:
-    os.makedirs(os.path.dirname(FIFO), exist_ok=True)
+    """Create the control FIFO owner-only (0600). Anything that can write here can
+    drive the overlay, so it must not be group- or world-writable."""
+    d = os.path.dirname(FIFO)
+    os.makedirs(d, mode=0o700, exist_ok=True)
+    os.chmod(d, 0o700)
     if not os.path.exists(FIFO):
-        os.mkfifo(FIFO)
+        os.mkfifo(FIFO, 0o600)
+    os.chmod(FIFO, 0o600)
     return FIFO
 
 
