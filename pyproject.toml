@@ -8,7 +8,10 @@ license = { text = "MIT" }
 authors = [{ name = "Atmosphere AI" }]
 keywords = ["mcp", "computer-use", "automation", "accessibility", "at-spi", "x11", "claude"]
 dependencies = [
-    "mcp>=1.2.0",
+    # Upper bound is load-bearing: mcp 2.0 removed `mcp.server.fastmcp` (the
+    # server is built on FastMCP), so an unpinned install resolves to 2.x and
+    # fails at import. Lift this only together with a port to mcp.server.mcpserver.
+    "mcp>=1.2.0,<2",
 ]
 
 [project.optional-dependencies]
