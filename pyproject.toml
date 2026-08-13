@@ -1,7 +1,7 @@
 [project]
 name = "claude-workman"
-version = "0.1.0"
-description = "Human-mode desktop control MCP connector for Linux/X11 — see, click, type, and act on the accessibility tree."
+version = "0.2.0"
+description = "Human-mode desktop control MCP connector for Linux/X11 — see, zoom, click, type, manage windows, and act on the accessibility tree."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
@@ -12,8 +12,11 @@ dependencies = [
 ]
 
 [project.optional-dependencies]
-# AT-SPI accuracy layer (system packages: gir1.2-atspi-2.0, python3-gi) + Pillow for downscaled screenshots
+# Accuracy + window/clipboard layers come from system GI typelibs
+# (gir1.2-atspi-2.0, gir1.2-wnck-3.0, python3-gi). Pillow drives screenshot
+# resizing and zoom — without it coordinates stop matching the screen.
 extras = ["PyGObject>=3.40", "Pillow>=9.0"]
+dev = ["pytest>=7.0", "Pillow>=9.0"]
 
 [project.scripts]
 claude-workman = "workman.server:main"

@@ -39,17 +39,64 @@ macOS AXUIElement-based computer use, ported to Linux via AT-SPI2 (`gi.repositor
 
 ## Tools
 
+**Seeing**
+
 | Tool | What it does |
 |------|--------------|
-| `screenshot` / `screenshot_region` | Capture the display (or a sub-rectangle) as PNG; `max_dim` downscales for faster round-trips |
+| `screenshot` | Capture the display. Downscaled to the model's image budget, and **reports the scale** so coordinates map back to screen pixels |
+| `zoom` | Magnify a region — re-grabbed from the live screen at full resolution, so it recovers detail the downscale threw away |
+| `screenshot_region` | A sub-rectangle at native resolution, no magnification |
+| `screen_info` | Screen size, monitor layout, image budget, last capture's scale |
+
+**Accessibility — the accuracy layer**
+
+| Tool | What it does |
+|------|--------------|
 | `accessibility_tree` | Actionable elements as `{app, role, name, x, y, w, h}` in screen coordinates |
 | `click_element` | Find an element by role + name and click its center — **no pixel guessing** |
+| `perform_element_action` | Invoke the element's *own* action (AXPress-style) — works where a synthetic click cannot reach |
+| `set_element_value` | Set a field's contents directly; no keystroke timing, no autocomplete corruption |
+| `element_actions` / `focused_element` / `wait_for_element` | What an element offers, what has focus, and blocking until something appears |
 | `enable_accessibility` | Turn on AT-SPI tree export (and silence the screen reader — see [safety](#speech-hazard-handled)) |
-| `list_windows` | Windows with id, name, pid, geometry |
-| `focus_window` | Raise a window by id or name; minimizes the frontmost blocker first |
-| `click` / `move` / `drag` / `scroll` | Pointer actions at pixel coordinates |
+
+**Input**
+
+| Tool | What it does |
+|------|--------------|
+| `click` | Click at a coordinate, with optional `modifiers` (shift-click) and `count` (double/triple) |
+| `move` / `hover` / `drag` / `scroll` | Pointer actions; `hover` waits for tooltips, `scroll` takes a position |
+| `mouse_button` / `key_hold` | Hold and release separately — rubber-band selection, ctrl-click runs |
 | `type_text` / `press_key` | Keyboard input — `press_key` uses xdotool syntax (`Return`, `ctrl+c`, `super+l`, `KP_0`) |
+| `pointer_position` / `wait` | Where the pointer is; pause for the UI to settle |
+
+**Windows, workspaces, apps, clipboard**
+
+| Tool | What it does |
+|------|--------------|
+| `list_windows` | Windows with id, name, pid, geometry **and state** (minimized/maximized/fullscreen/active/workspace) |
+| `window` | State changes: activate, minimize, maximize, fullscreen, above, pin, close |
+| `window_geometry` | Move and/or resize (unmaximizes first, since a maximized window ignores geometry) |
+| `focus_window` / `active_window` / `kill_window` | Raise by name, read focus, force-kill a stuck client |
+| `workspace` | List, switch, or move a window to another virtual desktop |
+| `launch_app` / `list_apps` / `terminate_app` | Start a program detached and wait for its window; list running or installable apps |
+| `clipboard_get` / `clipboard_set` | Read/write the clipboard — the reliable way to enter long or exact strings |
+| `batch` | Run several actions in one round-trip |
 | `show_cursor` | Visual click cursor overlay: a ring + click ripple showing exactly where the agent is acting |
+
+### Coordinates, and why `zoom` exists
+
+Every vision model shrinks an oversized image before it sees it. Hand over a 4K grab and let
+that happen silently and the model reports coordinates in a space nobody recorded — the classic
+"clicks land near the target, not on it".
+
+So Workman resizes screenshots itself, to a budget you control
+(`WORKMAN_IMAGE_MAX_EDGE`, default `1568`; high-resolution model tiers can take `2576`), and
+every capture reports its `scale`. Read a coordinate off the image and pass it straight back
+with `space="view"`, or multiply it yourself — but never guess.
+
+Detail lost to that resize is gone, and enlarging the shrunken copy only invents pixels.
+`zoom` therefore re-grabs the region from the live screen at **full resolution** and magnifies
+that, which is what makes small text, icon labels and status bars legible.
 
 ## Watch what it clicks
 
@@ -62,15 +109,19 @@ you can watch an agent work and interrupt it, instead of guessing what it just d
 Linux with X11, plus:
 
 ```bash
-sudo apt install xdotool ffmpeg gir1.2-atspi-2.0 python3-gi
+sudo apt install xdotool ffmpeg gir1.2-atspi-2.0 gir1.2-wnck-3.0 python3-gi
 # at-spi2-core is normally already running on GNOME/KDE
 ```
 
 - `ffmpeg` — screen capture (x11grab)
 - `xdotool` — mouse and keyboard input
 - `python3-gi` + `gir1.2-atspi-2.0` — the accessibility tree (import is `gi.repository.Atspi`, **not** `pyatspi`)
-- `Pillow` *(optional)* — only for `max_dim` screenshot downscaling
-- GTK 3 *(optional)* — only for the `show_cursor` overlay
+- `gir1.2-wnck-3.0` — window state and workspaces over EWMH: maximize, fullscreen, always-on-top,
+  pin, graceful close. `xdotool` can move and raise a window but cannot set these, and `wmctrl`
+  is not installed everywhere
+- `Pillow` — screenshot resizing and `zoom`. Without it the raw tools still work, but captures
+  are handed over full-size and the model's coordinates stop matching the screen
+- GTK 3 — the clipboard tools and the `show_cursor` overlay
 
 ## Install
 
