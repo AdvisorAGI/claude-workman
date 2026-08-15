@@ -1,0 +1,99 @@
+#!/usr/bin/env bash
+# cinemax-mood -- VLC tuned for the 42" 4K panel on HDMI-0 (3840x2160 @ 59.94).
+#
+# Why this exists: on this box a 1080p file plays at ~5% CPU / ~8% GPU, so
+# stutter is never a decode problem. It comes from the output path -- the
+# default upscaler is fast-and-rough, and frames are not pinned to the
+# panel's refresh, which reads as tearing.
+#
+# These are command-line options on purpose, NOT edits to ~/.config/vlc/vlcrc:
+# VLC rewrites vlcrc when it exits, so anything saved there can be silently
+# clobbered by a later run. Command-line options always win and never vanish.
+
+# Pin every presented frame to the vertical blank, and never let the driver
+# queue frames ahead -- a queue is what turns a dropped frame into visible
+# tearing rather than a single missed refresh.
+export __GL_SYNC_TO_VBLANK=1
+export __GL_MaxFramesAllowed=1
+export vblank_mode=1
+
+# Refresh rate: DO NOT switch this panel to 23.98 Hz. Tried 2026-08-15.
+#
+# The diagnosis was right -- the film is 23.976 fps against a 59.94 Hz
+# panel, exactly 2.5 refreshes per frame, so frames are held 3-2-3-2 and
+# every slow pan judders. 23.98 Hz would give a clean 1:1 cadence and X
+# accepted the mode.
+#
+# The Xiaomi panel did not. It dropped the HDMI signal and fell back to its
+# own TV input -- picture gone mid-film. xrandr reported success the whole
+# time, because X only knows what it asked for, not what the display did
+# with it. 59.94 Hz is the verified-good mode on HDMI-0 and it stays.
+#
+# So 3:2 judder on 24 fps content is a limit of this TV, not a bug to fix
+# here. Everything below reduces tearing and scaling artefacts, which are
+# separate defects and genuinely fixable. If you ever want to retry the
+# cadence experiment on a different display, do it by hand and watch the
+# screen -- never unattended from a script.
+
+/usr/bin/vlc \
+  --vout=gl \
+  --swscale-mode=2 \
+  --video-filter= \
+  --file-caching=3000 \
+  --network-caching=3000 \
+  --drop-late-frames \
+  --skip-frames \
+  --no-video-title-show \
+  --fullscreen \
+  \
+  `# Decode on the GB10 via VDPAU. Named explicitly so VLC stops probing
+   # VA-API first -- that probe always fails on this driver (there is no
+   # nvidia_drv_video.so) and the retry costs time at every stream start.` \
+  --avcodec-hw=vdpau \
+  \
+  `# Decode AC3/DTS in software instead of bitstreaming it over HDMI.
+   # The Mi TV refuses the pass-through connection outright ("digital
+   # pass-through stream connection failure"), which kills audio entirely
+   # rather than falling back -- so never offer it.` \
+  --no-spdif \
+  \
+  `# Subtitles: URW Gothic is the Avant Garde-style geometric sans -- the
+   # wide, even-width look Dune's titling uses. Colour is warm sand rather
+   # than pure white: white at 4K on a dark grade glares and pulls the eye
+   # off the picture. Thin outline + soft shadow keeps it legible over
+   # bright desert shots without a heavy black box around every line.` \
+  --freetype-font="URW Gothic" \
+  --freetype-color=0xE8DCC8 \
+  --freetype-opacity=225 \
+  --freetype-outline-thickness=2 \
+  --freetype-shadow-opacity=140 \
+  --freetype-rel-fontsize=18 \
+  --sub-margin=70 \
+  \
+  `# Audio is tuned for the JBL Charge 6 over A2DP/SBC -- one small
+   # full-range driver, not a 5.1 rig. Two problems follow from that.
+   #
+   # 1. The 5.1 track folds down to stereo, and Dune's mix has a huge
+   #    dynamic range: whispered dialogue against ornithopter booms. On a
+   #    portable speaker you either miss the words or get blasted. The
+   #    compressor pulls those two ends together.
+   # 2. The Charge 6 cannot reproduce much below ~60 Hz. Sending it that
+   #    energy anyway just uses up driver excursion and muddies the
+   #    midrange, so the low band is cut rather than boosted. The lift at
+   #    3-6 kHz is where consonants live -- that is what makes dialogue
+   #    intelligible, not turning it up.` \
+  --audio-filter=equalizer:compressor \
+  --equalizer-preamp=2 \
+  `# The Charge 6 sits in front of you at close range. That is near-field:
+   # you hear mostly direct sound, very little room reflection. So the
+   # presence lift and the makeup gain are both pulled back from what a
+   # speaker across the room would need -- over-correcting a near-field
+   # source is what makes dialogue sound harsh and sibilant.` \
+  --equalizer-bands="-6 -1 0 1 1 2 1 0 -1 -2" \
+  --compressor-threshold=-22 \
+  --compressor-ratio=6 \
+  --compressor-attack=25 \
+  --compressor-release=250 \
+  --compressor-knee=3 \
+  --compressor-makeup-gain=5 \
+  "$@"
