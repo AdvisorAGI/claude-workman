@@ -569,6 +569,35 @@ def chrome_wait_load(timeout_s: float = 15) -> dict:
     return chrome.wait_load(timeout_s=timeout_s)
 
 
+@mcp.tool()
+def chrome_autoscroll_read(selector: str | None = None, max_scrolls: int = 40,
+                           overlap_lines: int = 3, screenshots: bool = False,
+                           human: bool | None = None) -> dict:
+    """Walk a scrollable region and return the complete visible text.
+
+    Finds the container matching `selector` (AT-SPI name/role; CSS id/class
+    accepted as a hint) or the tallest scrollable element, then captures,
+    scrolls ~85% of the viewport, and stitches overlapping captures so the
+    result has no duplicated blocks and no gaps. Stops when the scroll
+    position stops advancing, the captured text stops adding new lines, or
+    `max_scrolls` is hit — `stopped_because` says which. Text is capped at
+    200000 chars (`truncated` true when cut). `human` defaults to the
+    global Human Mode flag; when on, scrolling is erratic bursts with
+    variable acceleration and small pauses. `screenshots=True` saves one
+    PNG per step and returns the paths.
+    """
+    return chrome.autoscroll_read(selector=selector, max_scrolls=max_scrolls,
+                                  overlap_lines=overlap_lines,
+                                  screenshots=screenshots, human=human)
+
+
+@mcp.tool()
+def chrome_autoscroll_to_top(selector: str | None = None) -> dict:
+    """Scroll the same container `chrome_autoscroll_read` would use back to
+    the top, so a read can start from the beginning."""
+    return chrome.autoscroll_to_top(selector=selector)
+
+
 # ---- BATCH -----------------------------------------------------------------
 # Non-visual actions only: interleaving images inside one result is awkward for
 # most clients, and the point here is to cut round-trips on action sequences.
@@ -585,6 +614,8 @@ _BATCH_OPS = {
     "chrome_list_tabs": chrome_list_tabs, "chrome_activate_tab": chrome_activate_tab,
     "chrome_read_page": chrome_read_page, "chrome_click_text": chrome_click_text,
     "chrome_type": chrome_type, "chrome_wait_load": chrome_wait_load,
+    "chrome_autoscroll_read": chrome_autoscroll_read,
+    "chrome_autoscroll_to_top": chrome_autoscroll_to_top,
     "workman_set_human_mode": workman_set_human_mode,
     "workman_get_human_mode": workman_get_human_mode,
 }

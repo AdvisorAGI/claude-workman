@@ -10,13 +10,14 @@ are deterministic.
 from __future__ import annotations
 
 import json
+import os
 import random
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import atspi, human, x11
+from . import atspi, autoscroll, human, x11
 from .human import (  # re-export so chrome_* and tests share one implementation
     CHAR_DELAY_MS,
     CLICK_PRESS_MS,
@@ -39,6 +40,9 @@ CDP_TIMEOUT_S = 1.5
 TEXT_CAP = 20000
 MAX_TAB_SWITCHES = 16
 TOOLBAR_PX = 90
+AUTOSCROLL_MAX = 200
+SETTLE_HUMAN_MS = (120, 280)
+SETTLE_FAST_MS = 80
 TAB_TYPES = {"page", "tab", "webview"}
 CLICKABLE_ROLES = {
     "push button", "button", "toggle button", "check box", "radio button",
@@ -457,3 +461,159 @@ def wait_load(timeout_s: float = 15, poll_s: float = 0.35,
         time.sleep(poll_s)
     return {"ok": False, "error": f"page did not settle within {timeout_s}s",
             "title": last_title, "loading": last_loading, "cdp": cdp_up}
+
+
+# ---- autoscroll-and-read ----------------------------------------------------
+
+def _use_human_flag(flag: bool | None) -> bool:
+    return human.enabled() if flag is None else bool(flag)
+
+
+def _document_container(win: dict | None) -> dict:
+    x, y, w, h = _geo(win)
+    top = y + TOOLBAR_PX
+    height = max(1, h - TOOLBAR_PX - 8)
+    width = max(1, w)
+    return {"role": "document", "name": "", "x": x, "y": top, "w": width, "h": height,
+            "cx": x + width // 2, "cy": top + height // 2, "via": "document"}
+
+
+def _container_public(container: dict) -> dict:
+    return {k: container.get(k) for k in ("role", "name", "x", "y", "w", "h", "via")}
+
+
+def _scroll_container(container: dict, direction: str, amount: int,
+                      use_human: bool) -> dict:
+    cx = int(container.get("cx") or 0)
+    cy = int(container.get("cy") or 0)
+    if use_human:
+        return human.human_scroll(direction, amount=amount, x=cx, y=cy)
+    return x11.scroll_at(cx, cy, direction, amount=amount)
+
+
+def _settle(use_human: bool, rng: random.Random | None = None) -> None:
+    if use_human:
+        _sleep_ms(_rng(rng).randint(*SETTLE_HUMAN_MS))
+    else:
+        time.sleep(SETTLE_FAST_MS / 1000.0)
+
+
+def _save_step_png(data: bytes, step: int) -> str:
+    directory = os.environ.get(
+        "WORKMAN_IMAGE_DIR", os.path.expanduser("~/.cache/workman/shots")
+    )
+    os.makedirs(directory, exist_ok=True)
+    path = os.path.join(directory, f"workman-autoscroll-{step:03d}-{os.getpid()}.png")
+    with open(path, "wb") as handle:
+        handle.write(data)
+    return path
+
+
+def _chrome_nodes() -> list[dict]:
+    return atspi.tree(app="chrom", actionable_only=False, limit=4000)
+
+
+def _prepare_container(selector: str | None) -> tuple[dict | None, dict | None]:
+    """Focus Chrome, dump the tree, pick the scrollable. Error dict or (container, None)."""
+    focused = focus()
+    if not focused.get("ok"):
+        return None, focused
+    win = find_chrome_window() or {}
+    try:
+        nodes = _chrome_nodes()
+    except Exception as exc:
+        return None, {"ok": False, "error": f"AT-SPI unavailable: {exc}",
+                      "title": focused.get("title") or _window_title()}
+    fallback = _document_container(win)
+    container = autoscroll.pick_container(nodes, selector, fallback)
+    return container, None
+
+
+def autoscroll_read(selector: str | None = None, max_scrolls: int = 40,
+                    overlap_lines: int = 3, screenshots: bool = False,
+                    human: bool | None = None) -> dict:
+    """Walk a scrollable region and return the complete visible text.
+
+    Container: AT-SPI match for `selector` if given, else the tallest
+    scrollable, else the document. Each step captures visible text via
+    the same AT-SPI path as `read_page`, scrolls ~85% of the viewport
+    through the existing x11/human scroll pathway, then stitches
+    overlapping captures.
+    """
+    container, err = _prepare_container(selector)
+    if err or container is None:
+        return err or {"ok": False, "error": "no scroll container"}
+    use_human = _use_human_flag(human)
+    rng = _rng()
+    try:
+        max_scrolls = max(0, min(int(max_scrolls), AUTOSCROLL_MAX))
+        overlap_lines = max(0, min(int(overlap_lines), 50))
+    except (TypeError, ValueError):
+        max_scrolls, overlap_lines = autoscroll.DEFAULT_MAX_SCROLLS, autoscroll.DEFAULT_OVERLAP
+    amount = autoscroll.wheel_ticks(container.get("h") or 0)
+
+    def capture() -> dict:
+        try:
+            nodes = _chrome_nodes()
+        except Exception:
+            nodes = []
+        text = autoscroll.lines_from_nodes(nodes, container, TEXT_ROLES)
+        return {"text": text, "position": text}
+
+    def do_scroll() -> None:
+        _scroll_container(container, "down", amount, use_human)
+
+    step = {"n": 0}
+
+    def shot() -> str | None:
+        try:
+            data = x11.screenshot()
+        except Exception:
+            return None
+        step["n"] += 1
+        return _save_step_png(data, step["n"])
+
+    result = autoscroll.run_autoscroll(
+        capture, do_scroll,
+        max_scrolls=max_scrolls,
+        overlap_lines=overlap_lines,
+        text_cap=autoscroll.TEXT_CAP,
+        settle=lambda: _settle(use_human, rng),
+        screenshot=shot if screenshots else None,
+    )
+    result["ok"] = True
+    result["human"] = use_human
+    result["container"] = _container_public(container)
+    return result
+
+
+def autoscroll_to_top(selector: str | None = None) -> dict:
+    """Scroll the autoscroll_read container back to its top."""
+    container, err = _prepare_container(selector)
+    if err or container is None:
+        return err or {"ok": False, "error": "no scroll container"}
+    use_human = human.enabled()
+    rng = _rng()
+    amount = autoscroll.wheel_ticks(container.get("h") or 0)
+
+    def capture_pos() -> str:
+        try:
+            nodes = _chrome_nodes()
+        except Exception:
+            nodes = []
+        return autoscroll.lines_from_nodes(nodes, container, TEXT_ROLES)
+
+    pos = capture_pos()
+    scrolls = 0
+    stopped = autoscroll.STOP_MAX_SCROLLS
+    for _ in range(autoscroll.DEFAULT_MAX_SCROLLS):
+        _scroll_container(container, "up", amount, use_human)
+        scrolls += 1
+        _settle(use_human, rng)
+        new = capture_pos()
+        if new == pos:
+            stopped = autoscroll.STOP_SCROLL_POSITION
+            break
+        pos = new
+    return {"ok": True, "scrolls": scrolls, "stopped_because": stopped,
+            "container": _container_public(container), "human": use_human}
