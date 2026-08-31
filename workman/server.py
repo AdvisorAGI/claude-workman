@@ -19,7 +19,7 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import apps, atspi, gtkops, vision, x11
+from . import apps, atspi, chrome, gtkops, vision, x11
 
 mcp = FastMCP("claude-workman")
 
@@ -437,6 +437,69 @@ def show_cursor(on: bool = True) -> dict:
     return {"ok": True, "overlay": "stopped"}
 
 
+# ---- CHROME ----------------------------------------------------------------
+@mcp.tool()
+def chrome_focus() -> dict:
+    """Find, raise and focus a Chrome/Chromium window. Returns its id and
+    title. Screenshot to verify before typing into the page."""
+    return chrome.focus()
+
+
+@mcp.tool()
+def chrome_open_url(url: str, new_tab: bool = True) -> dict:
+    """Open a URL the way a person does: focus Chrome, ctrl+t (or ctrl+l to
+    reuse the tab), type the URL with human cadence, press Return. Waits for
+    the tab title to change before returning."""
+    return chrome.open_url(url, new_tab=new_tab)
+
+
+@mcp.tool()
+def chrome_list_tabs() -> dict:
+    """List Chrome tabs via CDP http://127.0.0.1:9222/json (id, title, url,
+    active). If remote debugging is off, returns a 'no CDP' result with the
+    focused window title instead of failing hard."""
+    return chrome.list_tabs()
+
+
+@mcp.tool()
+def chrome_activate_tab(match: str) -> dict:
+    """Activate the first tab whose title or URL contains `match`. Uses
+    CDP /json/activate when available; otherwise walks ctrl+Tab reading the
+    window title."""
+    return chrome.activate_tab(match)
+
+
+@mcp.tool()
+def chrome_read_page() -> dict:
+    """Visible text of the active tab via the Chrome window's AT-SPI tree
+    (capped at 20000 chars), plus role/name of interactive elements.
+    Call enable_accessibility first so Chromium exports the web content."""
+    return chrome.read_page()
+
+
+@mcp.tool()
+def chrome_click_text(text: str) -> dict:
+    """Find a clickable element by visible name in Chrome's AT-SPI tree,
+    scroll it into view if needed, and human-click it (eased pointer path,
+    endpoint jitter)."""
+    return chrome.click_text(text)
+
+
+@mcp.tool()
+def chrome_type(text: str, human: bool = True) -> dict:
+    """Type into the focused Chrome window. human=True uses per-character
+    cadence (40–120 ms, occasional thinking pause); wraps the same type-text
+    path as everywhere else."""
+    return chrome.type_text(text, human=human)
+
+
+@mcp.tool()
+def chrome_wait_load(timeout_s: float = 15) -> dict:
+    """Wait until the page looks loaded: the window title stops changing,
+    and — when CDP is up — the active tab stops reporting a loading state."""
+    return chrome.wait_load(timeout_s=timeout_s)
+
+
 # ---- BATCH -----------------------------------------------------------------
 # Non-visual actions only: interleaving images inside one result is awkward for
 # most clients, and the point here is to cut round-trips on action sequences.
@@ -449,6 +512,10 @@ _BATCH_OPS = {
     "click_element": click_element, "perform_element_action": perform_element_action,
     "set_element_value": set_element_value, "wait_for_element": wait_for_element,
     "focused_element": focused_element, "pointer_position": pointer_position,
+    "chrome_focus": chrome_focus, "chrome_open_url": chrome_open_url,
+    "chrome_list_tabs": chrome_list_tabs, "chrome_activate_tab": chrome_activate_tab,
+    "chrome_read_page": chrome_read_page, "chrome_click_text": chrome_click_text,
+    "chrome_type": chrome_type, "chrome_wait_load": chrome_wait_load,
 }
 
 
