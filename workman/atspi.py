@@ -113,8 +113,11 @@ def click_element(name: str, role: str | None = None, app: str | None = None) ->
     el = find(name, role=role, app=app)
     if not el:
         return {"ok": False, "error": f"no element name~={name!r} role={role} app={app}"}
-    from . import x11
-    x11.click(el["cx"], el["cy"])
+    from . import human, x11
+    if human.enabled():
+        human.human_click(el["cx"], el["cy"])
+    else:
+        x11.click(el["cx"], el["cy"])
     return {"ok": True, "clicked": el}
 
 

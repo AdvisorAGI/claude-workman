@@ -32,77 +32,15 @@ CDP_PAGES = [
 ]
 
 
-class TestTypingCadence:
-    def test_normal_delays_stay_in_40_120(self):
-        delays = chrome.typing_cadence("hello world" * 8, rng=random.Random(0), think_chance=0)
-        assert delays
-        assert all(40 <= d <= 120 for d in delays)
-
-    def test_thinking_pauses_stay_in_250_500(self):
-        delays = chrome.typing_cadence("abcdef", rng=random.Random(1), think_chance=1.0)
-        assert all(250 <= d <= 500 for d in delays)
-
-    def test_enter_is_never_faster_than_150ms(self):
-        delays = chrome.typing_cadence("hi\n", rng=random.Random(2), think_chance=0)
-        assert delays[-1] >= chrome.ENTER_MIN_MS
-
-    def test_default_think_chance_is_in_band(self):
-        rng = random.Random(0)
-        # Draw the same way typing_cadence does when think_chance is omitted.
-        chance = rng.uniform(*chrome.THINK_CHANCE)
-        assert chrome.THINK_CHANCE[0] <= chance <= chrome.THINK_CHANCE[1]
-
-    def test_thinking_pause_rate_near_the_given_chance(self):
-        delays = chrome.typing_cadence("x" * 4000, rng=random.Random(0), think_chance=0.05)
-        rate = sum(1 for d in delays if d >= 250) / len(delays)
-        assert 0.03 < rate < 0.08
-
-    def test_same_seed_is_deterministic(self):
-        a = chrome.typing_cadence("seeded", rng=random.Random(99))
-        b = chrome.typing_cadence("seeded", rng=random.Random(99))
-        assert a == b
-
-
-class TestEasedPath:
-    def _paths(self, n=12):
-        for seed in range(n):
-            yield chrome.eased_path(10, 20, 400, 280, rng=random.Random(seed))
-
-    def test_intermediate_point_count_is_8_to_20(self):
-        for path in self._paths():
-            mids = path[1:-1]
-            assert chrome.PATH_MIDPOINTS[0] <= len(mids) <= chrome.PATH_MIDPOINTS[1]
-            assert len(path) == len(mids) + 2
-
-    def test_timing_is_monotonic_and_in_duration_band(self):
-        for path in self._paths():
-            times = [p[2] for p in path]
-            assert times == sorted(times)
-            assert times[0] == 0
-            lo, hi = chrome.PATH_DURATION_MS
-            assert lo <= times[-1] <= hi
-            # Integer rounding can stall one sample; never goes backwards.
-            assert all(times[i] <= times[i + 1] for i in range(len(times) - 1))
-
-    def test_endpoint_jitter_is_at_most_2px(self):
-        for seed in range(20):
-            path = chrome.eased_path(0, 0, 100, 50, rng=random.Random(seed))
-            x, y, _ = path[-1]
-            assert abs(x - 100) <= chrome.ENDPOINT_JITTER_PX
-            assert abs(y - 50) <= chrome.ENDPOINT_JITTER_PX
-
-    def test_short_move_is_near_minimum_duration(self):
-        path = chrome.eased_path(0, 0, 1, 0, rng=random.Random(3))
-        assert 300 <= path[-1][2] <= 400
-
-    def test_long_move_is_near_maximum_duration(self):
-        path = chrome.eased_path(0, 0, 5000, 5000, rng=random.Random(3))
-        assert 800 <= path[-1][2] <= 900
-
-    def test_click_press_duration_bounds(self):
-        rng = random.Random(0)
-        samples = [chrome.click_press_ms(rng) for _ in range(40)]
-        assert all(60 <= s <= 140 for s in samples)
+class TestHumanReexports:
+    def test_cadence_and_path_are_the_shared_module(self):
+        from workman import human
+        assert chrome.typing_cadence is human.typing_cadence
+        assert chrome.eased_path is human.eased_path
+        assert chrome.human_click is human.human_click
+        assert chrome.human_move is human.human_move
+        assert chrome.PATH_STEPS == human.PATH_STEPS
+        assert chrome.PATH_WAYPOINTS == human.PATH_WAYPOINTS
 
 
 class TestCdpParsing:
@@ -292,13 +230,14 @@ class TestOpenUrlAndType:
         assert keys[0] == "ctrl+l"
 
     def test_type_text_human_types_per_character(self, monkeypatch):
+        from workman import human
         typed = []
         monkeypatch.setattr(chrome.x11, "type_text",
                             lambda text, delay_ms=40: typed.append(text) or
                             {"ok": True, "typed_len": len(text)})
         monkeypatch.setattr(chrome.x11, "press_key",
                             lambda k: typed.append(f"<{k}>") or {"ok": True})
-        monkeypatch.setattr(chrome.time, "sleep", lambda s: None)
+        monkeypatch.setattr(human.time, "sleep", lambda s: None)
         result = chrome.type_text("ab\n", human=True, rng=random.Random(0))
         assert result["human"] is True
         assert typed[0] == "a" and typed[1] == "b"
@@ -348,18 +287,19 @@ class TestReadClickWait:
         assert seen == {"x": 30, "y": 25}
 
     def test_human_click_moves_along_path_then_presses(self, monkeypatch):
+        from workman import human
         moves, downs, ups = [], [], []
-        monkeypatch.setattr(chrome, "_pointer", lambda: (0, 0))
-        monkeypatch.setattr(chrome.x11, "move",
+        monkeypatch.setattr(human, "_pointer", lambda: (0, 0))
+        monkeypatch.setattr(human.x11, "move",
                             lambda x, y: moves.append((x, y)) or {"ok": True})
-        monkeypatch.setattr(chrome.x11, "mouse_down",
+        monkeypatch.setattr(human.x11, "mouse_down",
                             lambda button=1, x=None, y=None: downs.append(button) or {"ok": True})
-        monkeypatch.setattr(chrome.x11, "mouse_up",
+        monkeypatch.setattr(human.x11, "mouse_up",
                             lambda button=1, x=None, y=None: ups.append(button) or {"ok": True})
-        monkeypatch.setattr(chrome.time, "sleep", lambda s: None)
+        monkeypatch.setattr(human.time, "sleep", lambda s: None)
         result = chrome.human_click(100, 80, rng=random.Random(1))
         assert result["ok"] is True
-        assert 10 <= len(moves) <= 22
+        assert human.PATH_STEPS[0] <= len(moves) <= human.PATH_STEPS[1]
         assert downs == [1] and ups == [1]
         assert 60 <= result["press_ms"] <= 140
 

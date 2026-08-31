@@ -10,28 +10,34 @@ are deterministic.
 from __future__ import annotations
 
 import json
-import math
 import random
 import time
 import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import atspi, x11
+from . import atspi, human, x11
+from .human import (  # re-export so chrome_* and tests share one implementation
+    CHAR_DELAY_MS,
+    CLICK_PRESS_MS,
+    ENTER_MIN_MS,
+    PATH_DURATION_MS,
+    PATH_STEPS,
+    PATH_WAYPOINTS,
+    click_press_ms,
+    eased_path,
+    enter_delay_ms,
+    human_click,
+    human_move,
+    human_type,
+    path_duration_ms,
+    typing_cadence,
+)
 
 CDP_BASE = "http://127.0.0.1:9222"
 CDP_TIMEOUT_S = 1.5
 TEXT_CAP = 20000
 MAX_TAB_SWITCHES = 16
-CHAR_DELAY_MS = (40, 120)
-THINK_PAUSE_MS = (250, 500)
-THINK_CHANCE = (0.03, 0.08)
-ENTER_MIN_MS = 150
-CLICK_PRESS_MS = (60, 140)
-PATH_MIDPOINTS = (8, 20)
-PATH_DURATION_MS = (300, 900)
-ENDPOINT_JITTER_PX = 2
-DISTANCE_FOR_MAX_MS = 1500.0
 TOOLBAR_PX = 90
 TAB_TYPES = {"page", "tab", "webview"}
 CLICKABLE_ROLES = {
@@ -47,119 +53,12 @@ TEXT_ROLES = {
 
 
 def _rng(rng: random.Random | None = None) -> random.Random:
-    return rng if rng is not None else random.Random()
+    return human.resolve_rng(rng)
 
 
 def _sleep_ms(ms: float) -> None:
     if ms > 0:
         time.sleep(ms / 1000.0)
-
-
-# ---- human cadence ----------------------------------------------------------
-
-def typing_cadence(text: str, rng: random.Random | None = None,
-                   think_chance: float | None = None) -> list[int]:
-    """Per-character delays in milliseconds.
-
-    40–120 ms normally; with probability `think_chance` (drawn in 3–8% when
-    omitted) the gap is a 250–500 ms thinking pause instead. Enter/newline is
-    never faster than 150 ms after the previous character.
-    """
-    rng = _rng(rng)
-    if think_chance is None:
-        think_chance = rng.uniform(*THINK_CHANCE)
-    delays: list[int] = []
-    for ch in text:
-        if rng.random() < think_chance:
-            delay = rng.randint(*THINK_PAUSE_MS)
-        else:
-            delay = rng.randint(*CHAR_DELAY_MS)
-        if ch in "\n\r":
-            delay = max(delay, ENTER_MIN_MS)
-        delays.append(delay)
-    return delays
-
-
-def enter_delay_ms(rng: random.Random | None = None) -> int:
-    """Pause after the last typed character before pressing Return (>= 150 ms)."""
-    rng = _rng(rng)
-    return max(ENTER_MIN_MS, rng.randint(*CHAR_DELAY_MS))
-
-
-def click_press_ms(rng: random.Random | None = None) -> int:
-    return _rng(rng).randint(*CLICK_PRESS_MS)
-
-
-def _ease_in_out(t: float) -> float:
-    t = max(0.0, min(1.0, t))
-    return t * t * (3.0 - 2.0 * t)
-
-
-def path_duration_ms(x0: float, y0: float, x1: float, y1: float) -> int:
-    dist = math.hypot(x1 - x0, y1 - y0)
-    lo, hi = PATH_DURATION_MS
-    t = min(1.0, dist / DISTANCE_FOR_MAX_MS)
-    return int(round(lo + (hi - lo) * t))
-
-
-def eased_path(x0: float, y0: float, x1: float, y1: float,
-               rng: random.Random | None = None) -> list[tuple[int, int, int]]:
-    """Pointer path as (x, y, t_ms). Start + 8–20 intermediate points + end.
-
-    Timing is ease-in-out over 300–900 ms scaled by distance. The endpoint
-    carries ±2 px jitter; intermediate points aim at the jittered end so the
-    curve does not jump on the last sample.
-    """
-    rng = _rng(rng)
-    n_mid = rng.randint(*PATH_MIDPOINTS)
-    jitter = ENDPOINT_JITTER_PX
-    end_x = int(round(x1)) + rng.randint(-jitter, jitter)
-    end_y = int(round(y1)) + rng.randint(-jitter, jitter)
-    duration = path_duration_ms(x0, y0, end_x, end_y)
-    n_points = n_mid + 2  # start + mids + end
-    start_x, start_y = int(round(x0)), int(round(y0))
-    points: list[tuple[int, int, int]] = []
-    for i in range(n_points):
-        t = i / (n_points - 1)
-        e = _ease_in_out(t)
-        x = int(round(start_x + (end_x - start_x) * e))
-        y = int(round(start_y + (end_y - start_y) * e))
-        t_ms = int(round(duration * t))
-        points.append((x, y, t_ms))
-    return points
-
-
-def _pointer() -> tuple[int, int]:
-    info = x11.pointer_position()
-    try:
-        return int(info.get("x", 0) or 0), int(info.get("y", 0) or 0)
-    except (TypeError, ValueError):
-        return 0, 0
-
-
-def human_move(x: int, y: int, rng: random.Random | None = None) -> dict:
-    rng = _rng(rng)
-    x0, y0 = _pointer()
-    path = eased_path(x0, y0, x, y, rng)
-    for i, (px, py, t_ms) in enumerate(path):
-        if i > 0:
-            _sleep_ms(t_ms - path[i - 1][2])
-        x11.move(px, py)
-    ax, ay = path[-1][0], path[-1][1]
-    return {"ok": True, "at": [ax, ay], "target": [x, y], "points": len(path),
-            "duration_ms": path[-1][2]}
-
-
-def human_click(x: int, y: int, rng: random.Random | None = None,
-                button: int = 1) -> dict:
-    rng = _rng(rng)
-    moved = human_move(x, y, rng)
-    press = click_press_ms(rng)
-    x11.mouse_down(button)
-    _sleep_ms(press)
-    x11.mouse_up(button)
-    moved.update({"ok": True, "press_ms": press, "button": button})
-    return moved
 
 
 # ---- CDP (HTTP /json only) --------------------------------------------------
@@ -526,16 +425,7 @@ def type_text(text: str, human: bool = True, rng: random.Random | None = None) -
     """Type into the focused window, wrapping `x11.type_text` per character."""
     if not human:
         return x11.type_text(text)
-    rng = _rng(rng)
-    delays = typing_cadence(text, rng)
-    for ch, delay in zip(text, delays):
-        if ch in "\n\r":
-            _sleep_ms(max(delay, ENTER_MIN_MS))
-            x11.press_key("Return")
-        else:
-            x11.type_text(ch, delay_ms=0)
-            _sleep_ms(delay)
-    return {"ok": True, "typed_len": len(text), "human": True}
+    return human_type(text, rng=_rng(rng), typos=False)
 
 
 def wait_load(timeout_s: float = 15, poll_s: float = 0.35,

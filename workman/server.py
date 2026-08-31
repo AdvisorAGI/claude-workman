@@ -19,7 +19,7 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import apps, atspi, chrome, gtkops, vision, x11
+from . import apps, atspi, chrome, gtkops, human, vision, x11
 
 mcp = FastMCP("claude-workman")
 
@@ -198,6 +198,46 @@ def workspace(action: str = "list", index: int = 0, query: str = "") -> dict:
             "actions": ["list", "switch", "move_window"]}
 
 
+# ---- HUMAN MODE ------------------------------------------------------------
+@mcp.tool()
+def workman_set_human_mode(on: bool, seed: int | None = None) -> dict:
+    """Turn Human Mode on or off for this session.
+
+    When on, every input tool (move, click, type, scroll, mouse_button)
+    uses OS-level human cadence so a site cannot tell the pointer is
+    scripted. seed makes the cadence reproducible; omit it and a fresh
+    seed is drawn for the session. Default is off (fast, unchanged).
+    """
+    return human.set_mode(on, seed=seed)
+
+
+@mcp.tool()
+def workman_get_human_mode() -> dict:
+    """Current Human Mode flag and the RNG seed driving this session's cadence."""
+    return human.get_mode()
+
+
+def _click_with_human(x: int, y: int, button: int, count: int,
+                      modifiers: list[str]) -> dict:
+    """Human-move to the target, then click while holding modifiers in place."""
+    mods = [m.strip().lower() for m in modifiers if m.strip()]
+    unknown = [m for m in mods if m not in x11._MODIFIERS]
+    if unknown:
+        return {"ok": False, "error": f"unknown modifier(s) {unknown}",
+                "supported": sorted(x11._MODIFIERS)}
+    rng = human.session_rng()
+    human.human_move(x, y, rng)
+    for mod in mods:
+        x11.key_down(mod)
+    try:
+        press = human.human_press_click(button=button, count=count, rng=rng, aim=True)
+        return {"ok": True, "clicked": [x, y], "button": button, "count": count,
+                "modifiers": mods, "press_ms": press, "human": True}
+    finally:
+        for mod in reversed(mods):
+            x11.key_up(mod)
+
+
 # ---- MOUSE -----------------------------------------------------------------
 @mcp.tool()
 def click(x: int, y: int, button: int = 1, count: int = 1,
@@ -206,11 +246,17 @@ def click(x: int, y: int, button: int = 1, count: int = 1,
     modifiers hold keys during the click (e.g. ['shift'] to extend a selection).
     space='view' if the coordinates came from a downscaled screenshot.
 
-    Aim for the centre of the target, not its edge."""
+    Aim for the centre of the target, not its edge. Human Mode routes this
+    through an eased pointer path and a 60–140 ms press."""
     try:
         sx, sy = _to_screen(x, y, space)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+    if human.enabled():
+        if modifiers:
+            return _click_with_human(sx, sy, button=button, count=count,
+                                     modifiers=modifiers)
+        return human.human_click(sx, sy, button=button, count=count)
     if modifiers:
         return x11.click_with(sx, sy, button=button, count=count, modifiers=modifiers)
     return x11.click(sx, sy, button=button, count=count)
@@ -218,11 +264,14 @@ def click(x: int, y: int, button: int = 1, count: int = 1,
 
 @mcp.tool()
 def move(x: int, y: int, space: str = "screen") -> dict:
-    """Move the pointer without clicking."""
+    """Move the pointer without clicking. Human Mode follows a curved
+    multi-waypoint path instead of teleporting."""
     try:
         sx, sy = _to_screen(x, y, space)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+    if human.enabled():
+        return human.human_move(sx, sy)
     return x11.move(sx, sy)
 
 
@@ -234,6 +283,8 @@ def hover(x: int, y: int, settle_ms: int = 350, space: str = "screen") -> dict:
         sx, sy = _to_screen(x, y, space)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+    if human.enabled():
+        return human.human_hover(sx, sy, settle_ms=settle_ms)
     return x11.hover(sx, sy, settle_ms=settle_ms)
 
 
@@ -245,6 +296,8 @@ def drag(from_x: int, from_y: int, to_x: int, to_y: int, space: str = "screen") 
         tx, ty = _to_screen(to_x, to_y, space)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
+    if human.enabled():
+        return human.human_drag(fx, fy, tx, ty)
     return x11.drag(fx, fy, tx, ty)
 
 
@@ -253,13 +306,17 @@ def scroll(direction: str, amount: int = 3, x: int | None = None, y: int | None 
            space: str = "screen") -> dict:
     """Scroll up|down|left|right by `amount` wheel steps. Give x and y to scroll
     over a specific pane — without them it scrolls wherever the pointer happens
-    to be, which is rarely what you meant."""
-    if x is None or y is None:
+    to be, which is rarely what you meant. Human Mode uses erratic bursts."""
+    sx = sy = None
+    if x is not None and y is not None:
+        try:
+            sx, sy = _to_screen(x, y, space)
+        except ValueError as exc:
+            return {"ok": False, "error": str(exc)}
+    if human.enabled():
+        return human.human_scroll(direction, amount=amount, x=sx, y=sy)
+    if sx is None or sy is None:
         return x11.scroll(direction, amount=amount)
-    try:
-        sx, sy = _to_screen(x, y, space)
-    except ValueError as exc:
-        return {"ok": False, "error": str(exc)}
     return x11.scroll_at(sx, sy, direction, amount=amount)
 
 
@@ -274,6 +331,8 @@ def mouse_button(button: int = 1, press: bool = True, x: int | None = None,
             sx, sy = _to_screen(x, y, space)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
+    if human.enabled():
+        return human.human_mouse_button(button=button, press=press, x=sx, y=sy)
     return (x11.mouse_down if press else x11.mouse_up)(button=button, x=sx, y=sy)
 
 
@@ -285,10 +344,18 @@ def pointer_position() -> dict:
 
 # ---- KEYBOARD --------------------------------------------------------------
 @mcp.tool()
-def type_text(text: str, delay_ms: int = 40) -> dict:
+def type_text(text: str, delay_ms: int = 40, typos: bool = False,
+              field: str = "") -> dict:
     """Type literal text into the focused window. For long or exact strings,
     clipboard_set + a paste keystroke is faster and cannot be mangled by
-    autocomplete."""
+    autocomplete.
+
+    When Human Mode is on, inter-key cadence (50–300 ms, longer after
+    spaces) is used instead of delay_ms. typos=True opts into a rare
+    wrong-char-then-backspace; it stays off for password, URL, and money
+    fields even when requested."""
+    if human.enabled():
+        return human.human_type(text, typos=typos, field=field)
     return x11.type_text(text, delay_ms=delay_ms)
 
 
@@ -296,6 +363,8 @@ def type_text(text: str, delay_ms: int = 40) -> dict:
 def press_key(key: str) -> dict:
     """Press a key/combo in xdotool syntax: 'Return', 'Tab', 'ctrl+c',
     'super+l', 'KP_0'."""
+    if human.enabled() and key.lower() in {"return", "enter", "kp_enter"}:
+        time.sleep(human.enter_delay_ms() / 1000.0)
     return x11.press_key(key)
 
 
@@ -488,7 +557,7 @@ def chrome_click_text(text: str) -> dict:
 @mcp.tool()
 def chrome_type(text: str, human: bool = True) -> dict:
     """Type into the focused Chrome window. human=True uses per-character
-    cadence (40–120 ms, occasional thinking pause); wraps the same type-text
+    cadence (50–300 ms, longer after spaces); wraps the same type-text
     path as everywhere else."""
     return chrome.type_text(text, human=human)
 
@@ -516,6 +585,8 @@ _BATCH_OPS = {
     "chrome_list_tabs": chrome_list_tabs, "chrome_activate_tab": chrome_activate_tab,
     "chrome_read_page": chrome_read_page, "chrome_click_text": chrome_click_text,
     "chrome_type": chrome_type, "chrome_wait_load": chrome_wait_load,
+    "workman_set_human_mode": workman_set_human_mode,
+    "workman_get_human_mode": workman_get_human_mode,
 }
 
 
