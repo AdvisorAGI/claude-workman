@@ -19,7 +19,7 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import apps, atspi, chrome, gtkops, human, vision, x11
+from . import apps, atspi, bridge, chrome, gtkops, human, vision, x11
 
 mcp = FastMCP("claude-workman")
 
@@ -598,6 +598,192 @@ def chrome_autoscroll_to_top(selector: str | None = None) -> dict:
     return chrome.autoscroll_to_top(selector=selector)
 
 
+# ---- CHROME BRIDGE (workman-chrome extension) ------------------------------
+# The extension is SIGHT: DOM query, locate, read, page info. workman is the
+# OS-level HANDS. Prefer bridge_locate_and_click over the extension's own
+# dom.click / dom.type when a site must not see synthetic events.
+
+@mcp.tool()
+def bridge_start(port: int = 8765) -> dict:
+    """Listen on 127.0.0.1 for the workman-chrome extension (ws://.../workman).
+
+    Bind is loopback only. Empty WORKMAN_BRIDGE_HOST is treated as 127.0.0.1,
+    never 0.0.0.0. A second extension connect drops the older socket so a
+    browser restart recovers. Runs on a daemon thread; the MCP server is not
+    blocked.
+    """
+    return bridge.start(port=port)
+
+
+@mcp.tool()
+def bridge_stop() -> dict:
+    """Stop the workman-chrome WebSocket listener and drop any live connection."""
+    return bridge.stop()
+
+
+@mcp.tool()
+def bridge_status() -> dict:
+    """Bridge listener state: running, connected, ext_version, tabs, last_seen, pending."""
+    return bridge.status()
+
+
+@mcp.tool()
+def bridge_call(op: str, args: dict | None = None, timeout_s: float = 15) -> dict:
+    """Generic escape hatch: send {id, op, args} and return the extension result.
+
+    Known ops: tabs.list/activate/open/close, dom.query/locate/read/click/type,
+    page.info/scroll/await, shot.visible. On timeout or when nothing is
+    connected this returns {ok: false, error} rather than raising. For stealth
+    input prefer bridge_locate_and_click: the extension locates, workman clicks.
+    """
+    return bridge.call(op, args or {}, timeout_s=timeout_s)
+
+
+@mcp.tool()
+def bridge_tabs_list() -> dict:
+    """List Chrome tabs the extension can see ({tabs, count})."""
+    return bridge.call("tabs.list", {})
+
+
+@mcp.tool()
+def bridge_tabs_activate(tabId: int) -> dict:
+    """Activate a tab by id and focus its window."""
+    return bridge.call("tabs.activate", {"tabId": tabId})
+
+
+@mcp.tool()
+def bridge_tabs_open(url: str, active: bool = True) -> dict:
+    """Open a tab. url must be http(s) or file, matching the extension's allowlist."""
+    return bridge.call("tabs.open", {"url": url, "active": active})
+
+
+@mcp.tool()
+def bridge_tabs_close(tabId: int) -> dict:
+    """Close a tab by id."""
+    return bridge.call("tabs.close", {"tabId": tabId})
+
+
+@mcp.tool()
+def bridge_dom_query(tabId: int, selector: str, all_matches: bool = False) -> dict:
+    """Query the tab's DOM. Each match includes screen-space boundingRect.
+
+    all_matches=True returns up to 500 matches; otherwise the first match.
+    """
+    return bridge.call("dom.query",
+                       {"tabId": tabId, "selector": selector, "all": all_matches})
+
+
+@mcp.tool()
+def bridge_dom_locate(tabId: int, selector: str | None = None,
+                      text: str | None = None) -> dict:
+    """Best-matching element's centre in screen pixels. Purely informational.
+
+    Returns center (device pixels), centerCss, and boundingRect. No input is
+    fired. Feed the centre to workman's OS-level click, or use
+    bridge_locate_and_click which does that in one step.
+    """
+    args: dict = {"tabId": tabId}
+    if selector:
+        args["selector"] = selector
+    if text:
+        args["text"] = text
+    return bridge.call("dom.locate", args)
+
+
+@mcp.tool()
+def bridge_dom_read(tabId: int, selector: str | None = None) -> dict:
+    """innerText of the selector, or of the whole document. Capped at 30000 chars."""
+    args: dict = {"tabId": tabId}
+    if selector:
+        args["selector"] = selector
+    return bridge.call("dom.read", args)
+
+
+@mcp.tool()
+def bridge_dom_click(tabId: int, selector: str | None = None,
+                     text: str | None = None) -> dict:
+    """RELIABLE extension click (synthetic DOM events, stealth: false).
+
+    Detectable by anti-bot systems. For stealth, use bridge_locate_and_click
+    so workman presses the real pointer at the located centre.
+    """
+    args: dict = {"tabId": tabId}
+    if selector:
+        args["selector"] = selector
+    if text:
+        args["text"] = text
+    return bridge.call("dom.click", args)
+
+
+@mcp.tool()
+def bridge_dom_type(tabId: int, selector: str, text: str,
+                    clear: bool = False) -> dict:
+    """RELIABLE extension typing (synthetic key events, stealth: false).
+
+    Detectable. For stealth, bridge_dom_locate then type_text with Human Mode.
+    """
+    return bridge.call("dom.type",
+                       {"tabId": tabId, "selector": selector, "text": text,
+                        "clear": clear})
+
+
+@mcp.tool()
+def bridge_page_info(tabId: int) -> dict:
+    """url, title, readyState, viewport, scroll, dpr, chrome offsets."""
+    return bridge.call("page.info", {"tabId": tabId})
+
+
+@mcp.tool()
+def bridge_page_scroll(tabId: int, x: int | None = None, y: int | None = None,
+                       dx: int | None = None, dy: int | None = None,
+                       selector: str | None = None) -> dict:
+    """Scroll the page. Absolute (x, y), relative (dx, dy), or selector into view."""
+    args: dict = {"tabId": tabId}
+    if x is not None:
+        args["x"] = x
+    if y is not None:
+        args["y"] = y
+    if dx is not None:
+        args["dx"] = dx
+    if dy is not None:
+        args["dy"] = dy
+    if selector:
+        args["selector"] = selector
+    return bridge.call("page.scroll", args)
+
+
+@mcp.tool()
+def bridge_page_await(tabId: int, selector: str, timeout_ms: int = 10000) -> dict:
+    """Block until selector matches in the tab (default 10s)."""
+    timeout_s = max(15.0, float(timeout_ms) / 1000.0 + 2.0)
+    return bridge.call("page.await",
+                       {"tabId": tabId, "selector": selector,
+                        "timeout_ms": timeout_ms},
+                       timeout_s=timeout_s)
+
+
+@mcp.tool()
+def bridge_shot_visible(tabId: int | None = None) -> dict:
+    """PNG data URL of the visible tab. If tabId is given it must already be active."""
+    args: dict = {}
+    if tabId is not None:
+        args["tabId"] = tabId
+    return bridge.call("shot.visible", args)
+
+
+@mcp.tool()
+def bridge_locate_and_click(selector_or_text: str, tabId: int,
+                            timeout_s: float = 15) -> dict:
+    """Headline tool: extension sees, workman clicks.
+
+    Calls dom.locate for the element's screen-space centre, then clicks that
+    point with workman's OS-level pointer (Human Mode if it is on). Synthetic
+    DOM events are not used. Returns the located rect and the click result so
+    a caller can see what it aimed at.
+    """
+    return bridge.locate_and_click(selector_or_text, tabId, timeout_s=timeout_s)
+
+
 # ---- BATCH -----------------------------------------------------------------
 # Non-visual actions only: interleaving images inside one result is awkward for
 # most clients, and the point here is to cut round-trips on action sequences.
@@ -663,6 +849,12 @@ def batch(actions: list[dict], stop_on_error: bool = True) -> dict:
 
 
 def main() -> None:
+    # Extension retries ws://127.0.0.1:8765/workman forever; be there on boot.
+    # A bind failure must not take down the MCP server.
+    try:
+        bridge.start(port=8765)
+    except Exception:
+        pass
     mcp.run()
 
 
