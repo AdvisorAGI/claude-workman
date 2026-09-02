@@ -1,13 +1,14 @@
-# claude-workman — computer use for Linux, as an MCP server
+# claude-workman — computer use for Linux, macOS and Windows, as an MCP server
 
 [![MCP Server](https://img.shields.io/badge/MCP-server-blue)](https://modelcontextprotocol.io)
 [![License: MIT](https://img.shields.io/badge/License-MIT-green.svg)](LICENSE)
 [![Python 3.10+](https://img.shields.io/badge/python-3.10%2B-blue)](https://www.python.org/)
-[![Platform: Linux/X11](https://img.shields.io/badge/platform-Linux%20%2F%20X11-lightgrey)](#requirements)
+[![Platform: Linux | macOS | Windows](https://img.shields.io/badge/platform-Linux%20%7C%20macOS%20%7C%20Windows-lightgrey)](#platforms)
 
 **claude-workman is an open-source [MCP](https://modelcontextprotocol.io) server that gives an AI
-assistant human-mode control of a Linux desktop — it takes a screenshot, reads the
+assistant human-mode control of a real desktop — it takes a screenshot, reads the
 accessibility tree, then moves the mouse, clicks, types, and switches windows.**
+One tool surface, three backends: X11 on Linux, Quartz on macOS, Win32 on Windows.
 It works with Claude, Claude Code, and any other MCP client.
 
 Named after the Walkman: a small, portable thing that just plays. Point it at a display
@@ -104,9 +105,33 @@ that, which is what makes small text, icon labels and status bars legible.
 point and an expanding ripple on every click, with a label. It exists for **human oversight** —
 you can watch an agent work and interrupt it, instead of guessing what it just did.
 
-## Requirements
+## Platforms
 
-Linux with X11, plus:
+The MCP tools are identical everywhere; what changes underneath is the backend. Call
+`workman_platform` once at the start of a session and the server tells you which one is
+loaded, what `super` maps to, and the local gotcha to expect.
+
+| | Linux (X11) | macOS | Windows |
+|---|---|---|---|
+| see (`screenshot`, `zoom`) | ffmpeg x11grab | `screencapture`, normalised from Retina pixels to points | GDI `BitBlt`, DPI-aware |
+| input (`click`, `type_text`) | xdotool (XTEST) | Quartz `CGEvent`, else `cliclick`/System Events | `SendInput` |
+| windows | xdotool + Wnck/EWMH | `CGWindowList` + System Events | `EnumWindows` + `SetWindowPos` |
+| accessibility tree | AT-SPI2 | AXUIElement | not yet — use `chrome_*`/`bridge_*` for web UI |
+| virtual desktops | yes | no public API (says so, with the shortcut to use) | no public API (same) |
+| extra install | see below | nothing required; `pyobjc` strongly recommended | nothing required |
+
+`super` is the one key that differs by hardware, so it is normalised: write `super+l` and it is
+Super on Linux, **Command** on macOS, **Win** on Windows. `WORKMAN_BACKEND=linux|darwin|win32`
+forces a backend, which is how the other two are unit-tested from one machine.
+
+Two honest limits. There is no UI Automation backend on Windows yet, so `accessibility_tree`
+and `click_element` refuse there instead of returning an empty tree that would send a model back
+to guessing pixels. And on Wayland, XTEST input and x11grab only reach XWayland clients — the
+backend reports `wayland: true` so you know before you act, rather than after.
+
+### Linux requirements
+
+X11, plus:
 
 ```bash
 sudo apt install xdotool ffmpeg gir1.2-atspi-2.0 gir1.2-wnck-3.0 python3-gi
@@ -122,6 +147,31 @@ sudo apt install xdotool ffmpeg gir1.2-atspi-2.0 gir1.2-wnck-3.0 python3-gi
 - `Pillow` — screenshot resizing and `zoom`. Without it the raw tools still work, but captures
   are handed over full-size and the model's coordinates stop matching the screen
 - GTK 3 — the clipboard tools and the `show_cursor` overlay
+
+### macOS requirements
+
+Nothing is strictly required: `screencapture`, `osascript` and `sips` all ship with macOS. Two
+optional installs make it substantially better:
+
+```bash
+pip install "claude-workman[macos]"     # pyobjc: real CGEvent input + the AX tree
+brew install cliclick                   # optional fallback for input without pyobjc
+```
+
+Then grant the app that *launches* Workman (Terminal, iTerm, or your MCP client — not Workman
+itself, it has no bundle) two permissions in **System Settings > Privacy & Security**:
+
+- **Screen Recording** — without it `screenshot` returns a black frame rather than an error
+- **Accessibility** — without it synthetic clicks and keys are dropped silently
+
+Restart that app after granting; the grant is read at process start.
+
+### Windows requirements
+
+None. The backend is `ctypes` against `user32`/`gdi32`, so a bare `pip install claude-workman`
+is enough. `pip install "claude-workman[windows]"` adds Pillow, which only speeds up encoding
+large screenshots. Run the MCP client as the same user that owns the desktop session; a service
+account gets its own invisible window station and will capture a black screen.
 
 ## Install
 
@@ -185,9 +235,14 @@ desktop**: native apps, terminals, file managers, settings dialogs, and browsers
 Yes. Register it with `claude mcp add --scope user workman -- python -m workman.server`. It
 works with any MCP client, not only Claude.
 
-### Does it support Wayland or macOS?
-Not yet — X11 today. A Wayland backend and a macOS AXUIElement backend are the natural next
-steps, and contributions are welcome.
+### Does it support macOS and Windows?
+Yes, since 0.3.0 — macOS through Quartz and AXUIElement, Windows through ctypes to user32/gdi32
+with no third-party packages. See [Platforms](#platforms) for what each backend does and the two
+gaps that remain (Windows accessibility, and native Wayland).
+
+### Does it support Wayland?
+Only through XWayland. A native Wayland backend (portal-based capture and libei input) is the
+next backend on the list; the platform layer added in 0.3.0 is what makes it a drop-in.
 
 ### Is it safe to let an agent control my desktop?
 Treat it like handing over mouse and keyboard. Use `show_cursor` so you can see every action,

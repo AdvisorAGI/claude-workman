@@ -333,7 +333,7 @@ class TestChromeWiring:
                             lambda direction, amount=3, x=None, y=None, rng=None:
                             calls.append(("human", direction, amount, x, y)) or
                             {"ok": True, "human": True})
-        monkeypatch.setattr(chrome.x11, "scroll_at",
+        monkeypatch.setattr(chrome.desktop, "scroll_at",
                             lambda *a, **k: calls.append(("direct", a, k)) or
                             {"ok": True})
         monkeypatch.setattr(chrome.time, "sleep", lambda s: None)

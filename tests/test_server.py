@@ -32,14 +32,14 @@ class TestCoordinateSpace:
 
     def test_click_reports_bad_space_instead_of_clicking(self, monkeypatch):
         called = []
-        monkeypatch.setattr(server.x11, "click", lambda *a, **k: called.append(a))
+        monkeypatch.setattr(server.desktop, "click", lambda *a, **k: called.append(a))
         result = server.click(1, 2, space="nonsense")
         assert result["ok"] is False
         assert called == []
 
     def test_click_converts_view_coordinates(self, monkeypatch):
         seen = {}
-        monkeypatch.setattr(server.x11, "click",
+        monkeypatch.setattr(server.desktop, "click",
                             lambda x, y, button=1, count=1: seen.update(x=x, y=y) or {"ok": True})
         server._LAST_VIEW["scale"] = 0.5
         server.click(100, 100, space="view")
@@ -47,7 +47,7 @@ class TestCoordinateSpace:
 
     def test_click_with_modifiers_routes_to_modified_path(self, monkeypatch):
         seen = {}
-        monkeypatch.setattr(server.x11, "click_with",
+        monkeypatch.setattr(server.desktop, "click_with",
                             lambda *a, **k: seen.update(args=a, kwargs=k) or {"ok": True})
         server.click(5, 6, modifiers=["shift"])
         assert seen["kwargs"]["modifiers"] == ["shift"]
@@ -110,8 +110,8 @@ class TestBatch:
 
 class TestScreenshotMetadata:
     def test_reports_scale_and_records_it_for_view_coordinates(self, monkeypatch):
-        monkeypatch.setattr(server.x11, "screenshot", lambda **k: b"raw-png")
-        monkeypatch.setattr(server.x11, "screen_size", lambda: (3840, 2160))
+        monkeypatch.setattr(server.desktop, "screenshot", lambda **k: b"raw-png")
+        monkeypatch.setattr(server.desktop, "screen_size", lambda: (3840, 2160))
         monkeypatch.setattr(server.vision, "to_view",
                             lambda data: (b"small-png",
                                           {"screen": [3840, 2160], "view": [1568, 882],
@@ -123,8 +123,8 @@ class TestScreenshotMetadata:
         assert server._LAST_VIEW["scale"] == 0.408333
 
     def test_full_resolution_skips_the_resize(self, monkeypatch):
-        monkeypatch.setattr(server.x11, "screenshot", lambda **k: b"raw-png")
-        monkeypatch.setattr(server.x11, "screen_size", lambda: (3840, 2160))
+        monkeypatch.setattr(server.desktop, "screenshot", lambda **k: b"raw-png")
+        monkeypatch.setattr(server.desktop, "screen_size", lambda: (3840, 2160))
         monkeypatch.setattr(server.vision, "to_view",
                             lambda data: pytest.fail("should not resize"))
         meta, image = server.screenshot(full_resolution=True)
@@ -132,8 +132,8 @@ class TestScreenshotMetadata:
         assert meta["scale"] == 1.0
 
     def test_missing_pillow_degrades_to_raw_image(self, monkeypatch):
-        monkeypatch.setattr(server.x11, "screenshot", lambda **k: b"raw-png")
-        monkeypatch.setattr(server.x11, "screen_size", lambda: (3840, 2160))
+        monkeypatch.setattr(server.desktop, "screenshot", lambda **k: b"raw-png")
+        monkeypatch.setattr(server.desktop, "screen_size", lambda: (3840, 2160))
 
         def unavailable(data):
             raise server.vision.VisionUnavailable("Pillow is required")

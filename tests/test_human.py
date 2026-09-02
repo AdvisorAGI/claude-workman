@@ -160,9 +160,9 @@ class TestTyposAndSensitive:
 
     def test_typos_skipped_on_url_even_when_requested(self, monkeypatch):
         typed = []
-        monkeypatch.setattr(human.x11, "type_text",
+        monkeypatch.setattr(human.desktop, "type_text",
                             lambda text, delay_ms=40: typed.append(text) or {"ok": True})
-        monkeypatch.setattr(human.x11, "press_key",
+        monkeypatch.setattr(human.desktop, "press_key",
                             lambda k: typed.append(f"<{k}>") or {"ok": True})
         monkeypatch.setattr(human.time, "sleep", lambda s: None)
         result = human.human_type("https://x.test", rng=random.Random(0),
@@ -198,7 +198,7 @@ class TestModeFlag:
 
     def test_mode_off_move_is_direct(self, monkeypatch):
         seen = []
-        monkeypatch.setattr(server.x11, "move",
+        monkeypatch.setattr(server.desktop, "move",
                             lambda x, y: seen.append(("direct", x, y)) or {"ok": True, "at": [x, y]})
         monkeypatch.setattr(human, "human_move",
                             lambda *a, **k: seen.append("human") or {"ok": True})
@@ -209,7 +209,7 @@ class TestModeFlag:
 
     def test_mode_on_move_is_human(self, monkeypatch):
         seen = []
-        monkeypatch.setattr(server.x11, "move",
+        monkeypatch.setattr(server.desktop, "move",
                             lambda x, y: seen.append(("direct", x, y)) or {"ok": True})
         monkeypatch.setattr(human, "human_move",
                             lambda x, y, rng=None: seen.append(("human", x, y)) or
@@ -221,7 +221,7 @@ class TestModeFlag:
 
     def test_mode_on_click_is_human(self, monkeypatch):
         seen = []
-        monkeypatch.setattr(server.x11, "click",
+        monkeypatch.setattr(server.desktop, "click",
                             lambda *a, **k: seen.append("direct") or {"ok": True})
         monkeypatch.setattr(human, "human_click",
                             lambda x, y, rng=None, button=1, count=1: seen.append("human") or
@@ -233,7 +233,7 @@ class TestModeFlag:
 
     def test_mode_off_click_is_direct(self, monkeypatch):
         seen = []
-        monkeypatch.setattr(server.x11, "click",
+        monkeypatch.setattr(server.desktop, "click",
                             lambda x, y, button=1, count=1: seen.append("direct") or
                             {"ok": True, "clicked": [x, y]})
         monkeypatch.setattr(human, "human_click",
@@ -243,7 +243,7 @@ class TestModeFlag:
 
     def test_mode_on_type_uses_cadence(self, monkeypatch):
         seen = []
-        monkeypatch.setattr(server.x11, "type_text",
+        monkeypatch.setattr(server.desktop, "type_text",
                             lambda text, delay_ms=40: seen.append(("direct", text, delay_ms)) or
                             {"ok": True, "typed_len": len(text)})
         monkeypatch.setattr(human, "human_type",
@@ -256,7 +256,7 @@ class TestModeFlag:
 
     def test_mode_off_type_is_one_shot(self, monkeypatch):
         seen = []
-        monkeypatch.setattr(server.x11, "type_text",
+        monkeypatch.setattr(server.desktop, "type_text",
                             lambda text, delay_ms=40: seen.append(("direct", delay_ms)) or
                             {"ok": True, "typed_len": len(text)})
         server.type_text("hi", delay_ms=40)
@@ -264,7 +264,7 @@ class TestModeFlag:
 
     def test_mode_on_scroll_uses_bursts(self, monkeypatch):
         seen = []
-        monkeypatch.setattr(server.x11, "scroll",
+        monkeypatch.setattr(server.desktop, "scroll",
                             lambda direction, amount=3: seen.append(("direct", amount)) or
                             {"ok": True})
         monkeypatch.setattr(human, "human_scroll",

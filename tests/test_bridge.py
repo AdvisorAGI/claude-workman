@@ -229,10 +229,10 @@ class TestLocateAndClick:
             "boundingRect": {"x": 80, "y": 180, "w": 40, "h": 40, "dpr": 1},
         })
         clicks = []
-        monkeypatch.setattr(bridge.x11, "click",
+        monkeypatch.setattr(bridge.desktop, "click",
                             lambda x, y, **k: clicks.append((x, y)) or {
                                 "ok": True, "clicked": [x, y]})
-        monkeypatch.setattr(bridge.x11, "screen_size", lambda: (1920, 1080))
+        monkeypatch.setattr(bridge.desktop, "screen_size", lambda: (1920, 1080))
         monkeypatch.setattr(bridge.human, "enabled", lambda: False)
         out = inst.locate_and_click("OK", tabId=7)
         assert clicks == [(100, 200)]
@@ -255,9 +255,9 @@ class TestLocateAndClick:
         monkeypatch.setattr(bridge.human, "human_click",
                             lambda x, y, **k: seen.update(x=x, y=y) or {
                                 "ok": True, "human": True, "at": [x, y]})
-        monkeypatch.setattr(bridge.x11, "click",
+        monkeypatch.setattr(bridge.desktop, "click",
                             lambda *a, **k: pytest.fail("must not teleport"))
-        monkeypatch.setattr(bridge.x11, "screen_size", lambda: (1920, 1080))
+        monkeypatch.setattr(bridge.desktop, "screen_size", lambda: (1920, 1080))
         out = inst.locate_and_click("#go", tabId=1)
         assert seen == {"x": 10, "y": 20}
         assert out["human"] is True

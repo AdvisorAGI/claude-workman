@@ -20,14 +20,27 @@ import shlex
 import shutil
 import signal
 import subprocess
+import sys
 import time
 
-from . import x11
+from . import desktop
+
+IS_LINUX = sys.platform.startswith("linux")
+IS_MAC = sys.platform == "darwin"
+IS_WINDOWS = sys.platform.startswith("win")
 
 DESKTOP_DIRS = (
     "/usr/share/applications",
     "/usr/local/share/applications",
     os.path.expanduser("~/.local/share/applications"),
+)
+
+MAC_APP_DIRS = ("/Applications", "/System/Applications",
+                os.path.expanduser("~/Applications"))
+
+WINDOWS_MENU_DIRS = (
+    os.path.expandvars(r"%ProgramData%\Microsoft\Windows\Start Menu\Programs"),
+    os.path.expandvars(r"%AppData%\Microsoft\Windows\Start Menu\Programs"),
 )
 
 
@@ -52,11 +65,20 @@ def launch(command: str, args: list[str] | None = None, wait_for_window: float =
     if not argv:
         return {"ok": False, "error": "no command given"}
     if shutil.which(argv[0]) is None:
-        return {"ok": False, "error": f"{argv[0]!r} not found on PATH"}
+        # macOS and Windows install most software as a bundle or a Start Menu
+        # entry rather than something on PATH, so "not on PATH" is not the same
+        # as "not installed" there.
+        bundled = _bundle_argv(argv)
+        if bundled is None:
+            return {"ok": False, "error": f"{argv[0]!r} not found on PATH",
+                    "hint": ("try the display name of the app, e.g. 'Safari' or "
+                             "'Notepad'") if not IS_LINUX else ""}
+        argv = bundled
 
-    before = {w["id"] for w in x11.list_windows()}
+    before = {w["id"] for w in desktop.list_windows()}
     env = dict(os.environ)
-    env["DISPLAY"] = x11.DISPLAY
+    if IS_LINUX:
+        env["DISPLAY"] = desktop.display_name()
     try:
         proc = subprocess.Popen(
             argv, env=env, start_new_session=True,
@@ -69,7 +91,7 @@ def launch(command: str, args: list[str] | None = None, wait_for_window: float =
     if wait_for_window > 0:
         deadline = time.monotonic() + wait_for_window
         while time.monotonic() < deadline:
-            new = [w for w in x11.list_windows() if w["id"] not in before]
+            new = [w for w in desktop.list_windows() if w["id"] not in before]
             if new:
                 result["window"] = new[0]
                 return result
@@ -82,21 +104,45 @@ def launch(command: str, args: list[str] | None = None, wait_for_window: float =
 def list_apps() -> list[dict]:
     """Applications that currently own a window, one entry per process."""
     by_pid: dict[str, dict] = {}
-    for win in x11.list_windows():
+    for win in desktop.list_windows():
         pid = win.get("pid") or ""
-        entry = by_pid.setdefault(pid, {"pid": pid, "command": _command_for(pid), "windows": []})
+        entry = by_pid.setdefault(pid, {"pid": pid,
+                                        "command": _command_for(pid) or win.get("app", ""),
+                                        "windows": []})
         entry["windows"].append({"id": win["id"], "name": win["name"]})
     return sorted(by_pid.values(), key=lambda e: e["command"] or "")
 
 
 def _command_for(pid: str) -> str:
+    """The command line behind a pid. /proc on Linux, ps on macOS, and on
+    Windows the caller falls back to the window's owning executable."""
     if not pid or not pid.isdigit():
         return ""
-    try:
-        with open(f"/proc/{pid}/cmdline", "rb") as handle:
-            return " ".join(handle.read().decode(errors="replace").split("\0")).strip()
-    except OSError:
-        return ""
+    if IS_LINUX:
+        try:
+            with open(f"/proc/{pid}/cmdline", "rb") as handle:
+                return " ".join(handle.read().decode(errors="replace").split("\0")).strip()
+        except OSError:
+            return ""
+    if IS_MAC:
+        try:
+            out = subprocess.run(["ps", "-p", pid, "-o", "command="],
+                                 capture_output=True, text=True, timeout=10)
+            return out.stdout.strip()
+        except (OSError, subprocess.SubprocessError):
+            return ""
+    return ""
+
+
+def _bundle_argv(argv: list[str]) -> list[str] | None:
+    """Turn an app *name* into a launchable argv on macOS and Windows."""
+    if IS_MAC:
+        return ["open", "-a", argv[0]] + (["--args", *argv[1:]] if len(argv) > 1 else [])
+    if IS_WINDOWS:
+        match = next((a for a in list_launchable(argv[0], limit=1)), None)
+        if match:
+            return ["cmd", "/c", "start", "", match["exec"], *argv[1:]]
+    return None
 
 
 def list_launchable(query: str = "", limit: int = 60) -> list[dict]:
@@ -105,6 +151,10 @@ def list_launchable(query: str = "", limit: int = 60) -> list[dict]:
     Reads .desktop files directly rather than shelling out, and strips the
     field codes (%U, %F ...) that would otherwise be passed as literal argv.
     """
+    if IS_MAC:
+        return _list_mac_apps(query, limit)
+    if IS_WINDOWS:
+        return _list_windows_apps(query, limit)
     found: dict[str, dict] = {}
     needle = query.lower().strip()
     for directory in DESKTOP_DIRS:
@@ -149,12 +199,61 @@ def _parse_desktop(path: str) -> dict:
     return fields
 
 
+def _list_mac_apps(query: str = "", limit: int = 60) -> list[dict]:
+    """Installed .app bundles. `exec` is the bundle name because that is what
+    `open -a` wants, not the binary inside Contents/MacOS."""
+    needle = query.lower().strip()
+    found: list[dict] = []
+    for directory in MAC_APP_DIRS:
+        if not os.path.isdir(directory):
+            continue
+        for entry in sorted(os.listdir(directory)):
+            if not entry.endswith(".app"):
+                continue
+            name = entry[:-4]
+            if needle and needle not in name.lower():
+                continue
+            found.append({"name": name, "exec": name,
+                          "bundle": os.path.join(directory, entry)})
+            if len(found) >= limit:
+                return found
+    return found
+
+
+def _list_windows_apps(query: str = "", limit: int = 60) -> list[dict]:
+    """Start Menu shortcuts, which is where Windows actually keeps 'installed'."""
+    needle = query.lower().strip()
+    found: list[dict] = []
+    for directory in WINDOWS_MENU_DIRS:
+        if not directory or not os.path.isdir(directory):
+            continue
+        for root, _dirs, files in os.walk(directory):
+            for entry in sorted(files):
+                if not entry.lower().endswith((".lnk", ".url")):
+                    continue
+                name = os.path.splitext(entry)[0]
+                if needle and needle not in name.lower():
+                    continue
+                found.append({"name": name, "exec": os.path.join(root, entry)})
+                if len(found) >= limit:
+                    return found
+    return found
+
+
 def terminate(pid: int, force: bool = False, timeout: float = 5.0) -> dict:
     """Ask a process to exit (SIGTERM), escalating to SIGKILL only if asked.
 
     Prefer closing the window through the window manager — that gives the app a
     chance to prompt about unsaved work, which a signal does not.
     """
+    if IS_WINDOWS:
+        # Windows has no SIGTERM for GUI processes: taskkill without /F posts
+        # WM_CLOSE, which is the same "ask nicely first" contract.
+        cmd = ["taskkill", "/PID", str(pid)] + (["/F"] if force else [])
+        out = subprocess.run(cmd, capture_output=True, text=True, timeout=timeout + 5)
+        if out.returncode != 0:
+            return {"ok": False, "error": out.stdout.strip() or out.stderr.strip()}
+        return {"ok": True, "pid": pid, "signal": "taskkill /F" if force else "WM_CLOSE"}
     try:
         os.kill(pid, signal.SIGKILL if force else signal.SIGTERM)
     except ProcessLookupError:

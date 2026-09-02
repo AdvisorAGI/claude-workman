@@ -164,7 +164,7 @@ class TestListAndActivate:
                 titles.append(nxt.get(len(keys), titles[-1]))
             return {"ok": True}
 
-        monkeypatch.setattr(chrome.x11, "press_key", press)
+        monkeypatch.setattr(chrome.desktop, "press_key", press)
         result = chrome.activate_tab("Wanted")
         assert result["ok"] is True
         assert result["via"] == "ui"
@@ -184,7 +184,7 @@ class TestChromeWindow:
     def test_focus_returns_id_and_title(self, monkeypatch):
         monkeypatch.setattr(chrome, "find_chrome_window",
                             lambda: {"id": "4242", "name": "GitHub - Google Chrome"})
-        monkeypatch.setattr(chrome.x11, "focus_window",
+        monkeypatch.setattr(chrome.desktop, "focus_window",
                             lambda query, **k: {"ok": True, "target": query,
                                                 "frontmost_now": "GitHub - Google Chrome"})
         result = chrome.focus()
@@ -205,7 +205,7 @@ class TestOpenUrlAndType:
         monkeypatch.setattr(chrome, "_window_title", lambda: "Example - Google Chrome")
         monkeypatch.setattr(chrome, "_wait_title_change",
                             lambda prev, timeout_s=10: "Example - Google Chrome")
-        monkeypatch.setattr(chrome.x11, "press_key",
+        monkeypatch.setattr(chrome.desktop, "press_key",
                             lambda k: keys.append(k) or {"ok": True})
         monkeypatch.setattr(chrome, "type_text",
                             lambda text, human=True, rng=None: typed.append(text) or
@@ -222,7 +222,7 @@ class TestOpenUrlAndType:
         monkeypatch.setattr(chrome, "focus", lambda: {"ok": True, "id": "1", "title": "Old"})
         monkeypatch.setattr(chrome, "_window_title", lambda: "Old")
         monkeypatch.setattr(chrome, "_wait_title_change", lambda prev, timeout_s=10: "New")
-        monkeypatch.setattr(chrome.x11, "press_key", lambda k: keys.append(k) or {"ok": True})
+        monkeypatch.setattr(chrome.desktop, "press_key", lambda k: keys.append(k) or {"ok": True})
         monkeypatch.setattr(chrome, "type_text",
                             lambda text, human=True, rng=None: {"ok": True, "typed_len": len(text)})
         monkeypatch.setattr(chrome.time, "sleep", lambda s: None)
@@ -232,10 +232,10 @@ class TestOpenUrlAndType:
     def test_type_text_human_types_per_character(self, monkeypatch):
         from workman import human
         typed = []
-        monkeypatch.setattr(chrome.x11, "type_text",
+        monkeypatch.setattr(chrome.desktop, "type_text",
                             lambda text, delay_ms=40: typed.append(text) or
                             {"ok": True, "typed_len": len(text)})
-        monkeypatch.setattr(chrome.x11, "press_key",
+        monkeypatch.setattr(chrome.desktop, "press_key",
                             lambda k: typed.append(f"<{k}>") or {"ok": True})
         monkeypatch.setattr(human.time, "sleep", lambda s: None)
         result = chrome.type_text("ab\n", human=True, rng=random.Random(0))
@@ -245,7 +245,7 @@ class TestOpenUrlAndType:
 
     def test_type_text_non_human_is_one_shot(self, monkeypatch):
         typed = []
-        monkeypatch.setattr(chrome.x11, "type_text",
+        monkeypatch.setattr(chrome.desktop, "type_text",
                             lambda text, delay_ms=40: typed.append((text, delay_ms)) or
                             {"ok": True, "typed_len": len(text)})
         chrome.type_text("hello", human=False)
@@ -256,7 +256,7 @@ class TestReadClickWait:
     def test_read_page_caps_text_and_lists_interactive(self, monkeypatch):
         monkeypatch.setattr(chrome, "focus", lambda: {"ok": True, "id": "1", "title": "Page"})
         long_name = "x" * 25000
-        monkeypatch.setattr(chrome.atspi, "tree", lambda **k: [
+        monkeypatch.setattr(chrome.a11y, "tree", lambda **k: [
             {"app": "Google Chrome", "role": "document web", "name": long_name,
              "x": 0, "y": 0, "w": 10, "h": 10},
             {"app": "Google Chrome", "role": "link", "name": "Next",
@@ -290,11 +290,11 @@ class TestReadClickWait:
         from workman import human
         moves, downs, ups = [], [], []
         monkeypatch.setattr(human, "_pointer", lambda: (0, 0))
-        monkeypatch.setattr(human.x11, "move",
+        monkeypatch.setattr(human.desktop, "move",
                             lambda x, y: moves.append((x, y)) or {"ok": True})
-        monkeypatch.setattr(human.x11, "mouse_down",
+        monkeypatch.setattr(human.desktop, "mouse_down",
                             lambda button=1, x=None, y=None: downs.append(button) or {"ok": True})
-        monkeypatch.setattr(human.x11, "mouse_up",
+        monkeypatch.setattr(human.desktop, "mouse_up",
                             lambda button=1, x=None, y=None: ups.append(button) or {"ok": True})
         monkeypatch.setattr(human.time, "sleep", lambda s: None)
         result = chrome.human_click(100, 80, rng=random.Random(1))

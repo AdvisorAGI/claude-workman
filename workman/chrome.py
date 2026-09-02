@@ -17,7 +17,7 @@ import urllib.error
 import urllib.parse
 import urllib.request
 
-from . import atspi, autoscroll, human, x11
+from . import a11y, autoscroll, desktop, human
 from .human import (  # re-export so chrome_* and tests share one implementation
     CHAR_DELAY_MS,
     CLICK_PRESS_MS,
@@ -169,12 +169,12 @@ def is_chrome_window(win: dict) -> bool:
 
 
 def find_chrome_window() -> dict | None:
-    wins = x11.list_windows()
+    wins = desktop.list_windows()
     matches = [w for w in wins if is_chrome_window(w)]
     if not matches:
         return None
     try:
-        active = x11.active_window()
+        active = desktop.active_window()
     except Exception:
         active = {}
     if active.get("ok") and any(m.get("id") == active.get("id") for m in matches):
@@ -188,7 +188,7 @@ def find_chrome_window() -> dict | None:
 
 def _window_title() -> str:
     try:
-        info = x11.active_window()
+        info = desktop.active_window()
     except Exception:
         info = {}
     return (info.get("name") or "") if info.get("ok") else ""
@@ -226,7 +226,7 @@ def focus() -> dict:
     win = find_chrome_window()
     if not win:
         return {"ok": False, "error": "no Chrome/Chromium window"}
-    result = x11.focus_window(str(win["id"]))
+    result = desktop.focus_window(str(win["id"]))
     title = win.get("name") or ""
     if result.get("frontmost_now"):
         title = result["frontmost_now"]
@@ -244,14 +244,14 @@ def open_url(url: str, new_tab: bool = True, rng: random.Random | None = None) -
     focused = focus()
     if not focused.get("ok"):
         return focused
-    x11.press_key("ctrl+t" if new_tab else "ctrl+l")
+    desktop.press_key("ctrl+t" if new_tab else "ctrl+l")
     _sleep_ms(rng.randint(80, 180))
     before = _window_title() or focused.get("title") or ""
     typed = type_text(url, human=True, rng=rng)
     if not typed.get("ok"):
         return typed
     _sleep_ms(enter_delay_ms(rng))
-    x11.press_key("Return")
+    desktop.press_key("Return")
     title = _wait_title_change(before, timeout_s=10.0)
     return {"ok": True, "url": url, "new_tab": new_tab, "id": focused.get("id"),
             "title": title, "title_changed": title != before}
@@ -297,7 +297,7 @@ def activate_tab(match: str, rng: random.Random | None = None) -> dict:
     for step in range(MAX_TAB_SWITCHES):
         if needle in title.lower():
             return {"ok": True, "via": "ui", "title": title, "steps": step}
-        x11.press_key("ctrl+Tab")
+        desktop.press_key("ctrl+Tab")
         _sleep_ms(rng.randint(80, 160))
         title = _window_title()
         if step > 0 and title == start:
@@ -312,7 +312,7 @@ def read_page() -> dict:
     focused = focus()
     title = focused.get("title") or _window_title()
     try:
-        nodes = atspi.tree(app="chrom", actionable_only=False, limit=4000)
+        nodes = a11y.tree(app="chrom", actionable_only=False, limit=4000)
     except Exception as exc:
         return {"ok": False, "error": f"AT-SPI unavailable: {exc}", "title": title}
     if not nodes:
@@ -331,7 +331,7 @@ def read_page() -> dict:
         if role_l in TEXT_ROLES and name not in seen_text:
             seen_text.add(name)
             texts.append(name)
-        if role_l in CLICKABLE_ROLES or role_l in atspi.ACTIONABLE:
+        if role_l in CLICKABLE_ROLES or role_l in a11y.ACTIONABLE_ROLES:
             key = (role_l, name)
             if key not in seen_el:
                 seen_el.add(key)
@@ -348,7 +348,7 @@ def _find_clickable(text: str) -> dict | None:
     if not needle:
         return None
     try:
-        nodes = atspi.tree(app="chrom", actionable_only=False, limit=2000)
+        nodes = a11y.tree(app="chrom", actionable_only=False, limit=2000)
     except Exception:
         return None
     clickable: list[dict] = []
@@ -392,9 +392,9 @@ def _scroll_towards(el: dict, win: dict | None) -> None:
     px, py = wx + ww // 2, wy + wh // 2
     cy = el.get("cy", 0)
     if cy > wy + wh - 8:
-        x11.scroll_at(px, py, "down", amount=3)
+        desktop.scroll_at(px, py, "down", amount=3)
     elif cy < wy + TOOLBAR_PX:
-        x11.scroll_at(px, py, "up", amount=3)
+        desktop.scroll_at(px, py, "up", amount=3)
 
 
 def click_text(text: str, rng: random.Random | None = None) -> dict:
@@ -426,9 +426,9 @@ def click_text(text: str, rng: random.Random | None = None) -> dict:
 
 
 def type_text(text: str, human: bool = True, rng: random.Random | None = None) -> dict:
-    """Type into the focused window, wrapping `x11.type_text` per character."""
+    """Type into the focused window, wrapping `desktop.type_text` per character."""
     if not human:
-        return x11.type_text(text)
+        return desktop.type_text(text)
     return human_type(text, rng=_rng(rng), typos=False)
 
 
@@ -488,7 +488,7 @@ def _scroll_container(container: dict, direction: str, amount: int,
     cy = int(container.get("cy") or 0)
     if use_human:
         return human.human_scroll(direction, amount=amount, x=cx, y=cy)
-    return x11.scroll_at(cx, cy, direction, amount=amount)
+    return desktop.scroll_at(cx, cy, direction, amount=amount)
 
 
 def _settle(use_human: bool, rng: random.Random | None = None) -> None:
@@ -510,7 +510,7 @@ def _save_step_png(data: bytes, step: int) -> str:
 
 
 def _chrome_nodes() -> list[dict]:
-    return atspi.tree(app="chrom", actionable_only=False, limit=4000)
+    return a11y.tree(app="chrom", actionable_only=False, limit=4000)
 
 
 def _prepare_container(selector: str | None) -> tuple[dict | None, dict | None]:
@@ -567,7 +567,7 @@ def autoscroll_read(selector: str | None = None, max_scrolls: int = 40,
 
     def shot() -> str | None:
         try:
-            data = x11.screenshot()
+            data = desktop.screenshot()
         except Exception:
             return None
         step["n"] += 1

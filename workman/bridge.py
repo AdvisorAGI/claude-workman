@@ -28,7 +28,7 @@ import time
 from dataclasses import dataclass
 from datetime import datetime, timezone
 
-from . import human, x11
+from . import desktop, human
 
 LOOPBACK = "127.0.0.1"
 HOST_ENV = "WORKMAN_BRIDGE_HOST"
@@ -428,7 +428,7 @@ def click_at_os(x: int, y: int) -> dict:
     """OS-level click, honouring Human Mode. This is the stealth hand."""
     if human.enabled():
         return human.human_click(int(x), int(y))
-    return x11.click(int(x), int(y))
+    return desktop.click(int(x), int(y))
 
 
 def _now_iso() -> str:
@@ -610,7 +610,7 @@ class Bridge:
         if not located.get("ok"):
             return located
         try:
-            screen = x11.screen_size()
+            screen = desktop.screen_size()
         except Exception:
             screen = None
         try:

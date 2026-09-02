@@ -1,12 +1,13 @@
 [project]
 name = "claude-workman"
-version = "0.2.0"
-description = "Human-mode desktop control MCP connector for Linux/X11 — see, zoom, click, type, manage windows, and act on the accessibility tree."
+version = "0.3.0"
+description = "Human-mode desktop control MCP connector for Linux, macOS and Windows — see, zoom, click, type, manage windows, and act on the accessibility tree."
 readme = "README.md"
 requires-python = ">=3.10"
 license = { text = "MIT" }
 authors = [{ name = "Atmosphere AI" }]
-keywords = ["mcp", "computer-use", "automation", "accessibility", "at-spi", "x11", "claude"]
+keywords = ["mcp", "computer-use", "automation", "accessibility", "at-spi",
+            "axuielement", "x11", "macos", "windows", "claude"]
 dependencies = [
     # Upper bound is load-bearing: mcp 2.0 removed `mcp.server.fastmcp` (the
     # server is built on FastMCP), so an unpinned install resolves to 2.x and
@@ -14,11 +15,28 @@ dependencies = [
     "mcp>=1.2.0,<2",
 ]
 
+classifiers = [
+    "Environment :: X11 Applications",
+    "Operating System :: POSIX :: Linux",
+    "Operating System :: MacOS :: MacOS X",
+    "Operating System :: Microsoft :: Windows",
+    "Programming Language :: Python :: 3",
+    "Topic :: Desktop Environment",
+]
+
 [project.optional-dependencies]
-# Accuracy + window/clipboard layers come from system GI typelibs
+# Linux: the accuracy + window/clipboard layers come from system GI typelibs
 # (gir1.2-atspi-2.0, gir1.2-wnck-3.0, python3-gi). Pillow drives screenshot
 # resizing and zoom — without it coordinates stop matching the screen.
 extras = ["PyGObject>=3.40", "Pillow>=9.0"]
+# macOS: Quartz gives real event injection and the window list;
+# ApplicationServices gives the AXUIElement tree. Without them the backend
+# still sees and can act through screencapture/osascript, more slowly.
+macos = ["pyobjc-framework-Quartz>=9.0", "pyobjc-framework-ApplicationServices>=9.0",
+         "pyobjc-framework-Cocoa>=9.0", "Pillow>=9.0"]
+# Windows needs no third-party package at all: the backend is ctypes against
+# user32/gdi32. Pillow is only a speed-up for large screenshots.
+windows = ["Pillow>=9.0"]
 dev = ["pytest>=7.0", "Pillow>=9.0"]
 
 [project.scripts]
@@ -34,4 +52,7 @@ requires = ["setuptools>=61"]
 build-backend = "setuptools.build_meta"
 
 [tool.setuptools]
-packages = ["workman"]
+# workman.platform must be listed explicitly: setuptools does not recurse into
+# subpackages here, and omitting it ships a wheel that imports on the developer's
+# machine and fails on every user's.
+packages = ["workman", "workman.platform"]

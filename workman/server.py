@@ -19,7 +19,7 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import apps, atspi, bridge, chrome, gtkops, human, vision, x11
+from . import a11y, apps, bridge, chrome, desktop, human, vision
 
 mcp = FastMCP("claude-workman")
 
@@ -53,8 +53,8 @@ def screenshot(max_dim: int | None = None, full_resolution: bool = False,
     save_to_disk writes a copy and returns the path — only worth it when a human
     is meant to look at the file.
     """
-    raw = x11.screenshot(max_dim=max_dim)
-    meta = {"screen": list(x11.screen_size()), "view": None, "scale": 1.0, "resized": False}
+    raw = desktop.screenshot(max_dim=max_dim)
+    meta = {"screen": list(desktop.screen_size()), "view": None, "scale": 1.0, "resized": False}
     data = raw
     if not full_resolution and max_dim is None:
         try:
@@ -79,7 +79,7 @@ def screenshot(max_dim: int | None = None, full_resolution: bool = False,
 def screenshot_region(x: int, y: int, w: int, h: int) -> Image:
     """Capture a sub-rectangle of the screen at native resolution (faster than a
     full grab). For reading small detail, prefer `zoom`, which also magnifies."""
-    return Image(data=x11.screenshot(region=(x, y, w, h)), format="png")
+    return Image(data=desktop.screenshot(region=(x, y, w, h)), format="png")
 
 
 @mcp.tool()
@@ -95,14 +95,14 @@ def zoom(x1: int, y1: int, x2: int, y2: int, space: str = "view",
     of the last screenshot.
     """
     try:
-        screen_w, screen_h = x11.screen_size()
+        screen_w, screen_h = desktop.screen_size()
         if space == "view":
             scale = _LAST_VIEW.get("scale") or 1.0
             x1, y1, x2, y2 = (round(v / scale) for v in (x1, y1, x2, y2))
         elif space != "screen":
             return [{"ok": False, "error": f"space must be 'screen' or 'view', got {space!r}"}]
         rx, ry, rw, rh = vision.normalize_region(x1, y1, x2, y2, (screen_w, screen_h))
-        raw = x11.screenshot(region=(rx, ry, rw, rh))
+        raw = desktop.screenshot(region=(rx, ry, rw, rh))
         data, meta = vision.magnify(raw)
     except (ValueError, vision.VisionUnavailable) as exc:
         return [{"ok": False, "error": str(exc)}]
@@ -119,17 +119,38 @@ def screen_info() -> dict:
     """Screen size, monitor layout, image budget and the last capture's scale.
     Check this before trusting one screen size — a scaled or multi-head setup can
     make the X screen and a panel's native mode disagree."""
-    width, height = x11.screen_size()
+    width, height = desktop.screen_size()
     budget = vision.max_edge()
+    info = desktop.platform_info()
     return {
         "ok": True,
         "screen": {"w": width, "h": height},
-        "monitors": x11.monitors(),
+        "monitors": desktop.monitors(),
         "image_max_edge": budget,
         "view_size": list(vision.view_size(width, height)),
         "last_capture": dict(_LAST_VIEW),
-        "display": x11.DISPLAY,
+        "display": desktop.display_name(),
+        # Carried here as well as in workman_platform because it changes how a
+        # caller must write a shortcut: 'super' is Command on macOS.
+        "backend": info.get("backend"),
+        "modifier_super": info.get("modifier_super"),
     }
+
+
+@mcp.tool()
+def workman_platform() -> dict:
+    """Which OS backend is driving this desktop, and what it can and cannot do.
+
+    Worth one call at the start of a session on an unfamiliar machine: it names
+    the backend (linux_x11 | darwin | win32), what `super` maps to, which helper
+    binaries are installed, the accessibility layer in use, and the permission
+    or session gotcha that most often makes actions silently do nothing
+    (Wayland on Linux, Screen Recording and Accessibility on macOS).
+    """
+    info = desktop.platform_info()
+    info["accessibility"] = a11y.backend_name()
+    info["human_mode"] = human.get_mode()
+    return info
 
 
 # ---- WINDOWS ---------------------------------------------------------------
@@ -137,10 +158,7 @@ def screen_info() -> dict:
 def list_windows() -> list[dict]:
     """List on-screen windows with id, name, pid, geometry and state
     (minimized/maximized/fullscreen/active/workspace)."""
-    result = gtkops.call("windows")
-    if result.get("ok"):
-        return result["windows"]
-    return x11.list_windows()  # Wnck unavailable — fall back to raw geometry
+    return desktop.list_windows_rich()
 
 
 @mcp.tool()
@@ -148,7 +166,7 @@ def focus_window(query: str, minimize_blockers: bool = True) -> dict:
     """Raise a window by id or name-substring. On focus-stealing WMs (e.g.
     mutter) plain activation can silently fail, so the frontmost blocker is
     minimized first. Always screenshot to verify focus before typing."""
-    return x11.focus_window(query, minimize_blockers=minimize_blockers)
+    return desktop.focus_window(query, minimize_blockers=minimize_blockers)
 
 
 @mcp.tool()
@@ -160,7 +178,7 @@ def window(action: str, query: str) -> dict:
     `close` is the graceful route — the app can still prompt about unsaved work.
     Use kill_window only when close is ignored.
     """
-    return gtkops.call("window_action", query=query, action=action)
+    return desktop.window_action(query, action)
 
 
 @mcp.tool()
@@ -168,20 +186,20 @@ def window_geometry(query: str, x: int | None = None, y: int | None = None,
                     w: int | None = None, h: int | None = None) -> dict:
     """Move and/or resize a window. Omitted values are left alone. A maximized
     window ignores geometry, so it is unmaximized first."""
-    return gtkops.call("window_geometry", query=query, x=x, y=y, w=w, h=h)
+    return desktop.window_geometry(query, x=x, y=y, w=w, h=h)
 
 
 @mcp.tool()
 def kill_window(query: str) -> dict:
     """Force a window's client to die. Unsaved work is lost — try
     window(action='close') first."""
-    return x11.kill_window(query)
+    return desktop.kill_window(query)
 
 
 @mcp.tool()
 def active_window() -> dict:
     """The window that currently has focus."""
-    return x11.active_window()
+    return desktop.active_window()
 
 
 @mcp.tool()
@@ -189,11 +207,11 @@ def workspace(action: str = "list", index: int = 0, query: str = "") -> dict:
     """Virtual desktops. action: list | switch | move_window.
     switch needs `index`; move_window needs `index` and `query`."""
     if action == "list":
-        return gtkops.call("workspaces")
+        return desktop.workspaces()
     if action == "switch":
-        return gtkops.call("set_workspace", index=index)
+        return desktop.set_workspace(index=index)
     if action == "move_window":
-        return gtkops.call("move_to_workspace", query=query, index=index)
+        return desktop.move_to_workspace(query, index=index)
     return {"ok": False, "error": f"unknown action {action!r}",
             "actions": ["list", "switch", "move_window"]}
 
@@ -221,21 +239,21 @@ def _click_with_human(x: int, y: int, button: int, count: int,
                       modifiers: list[str]) -> dict:
     """Human-move to the target, then click while holding modifiers in place."""
     mods = [m.strip().lower() for m in modifiers if m.strip()]
-    unknown = [m for m in mods if m not in x11._MODIFIERS]
+    unknown = [m for m in mods if m not in desktop.MODIFIERS]
     if unknown:
         return {"ok": False, "error": f"unknown modifier(s) {unknown}",
-                "supported": sorted(x11._MODIFIERS)}
+                "supported": sorted(desktop.MODIFIERS)}
     rng = human.session_rng()
     human.human_move(x, y, rng)
     for mod in mods:
-        x11.key_down(mod)
+        desktop.key_down(mod)
     try:
         press = human.human_press_click(button=button, count=count, rng=rng, aim=True)
         return {"ok": True, "clicked": [x, y], "button": button, "count": count,
                 "modifiers": mods, "press_ms": press, "human": True}
     finally:
         for mod in reversed(mods):
-            x11.key_up(mod)
+            desktop.key_up(mod)
 
 
 # ---- MOUSE -----------------------------------------------------------------
@@ -258,8 +276,8 @@ def click(x: int, y: int, button: int = 1, count: int = 1,
                                      modifiers=modifiers)
         return human.human_click(sx, sy, button=button, count=count)
     if modifiers:
-        return x11.click_with(sx, sy, button=button, count=count, modifiers=modifiers)
-    return x11.click(sx, sy, button=button, count=count)
+        return desktop.click_with(sx, sy, button=button, count=count, modifiers=modifiers)
+    return desktop.click(sx, sy, button=button, count=count)
 
 
 @mcp.tool()
@@ -272,7 +290,7 @@ def move(x: int, y: int, space: str = "screen") -> dict:
         return {"ok": False, "error": str(exc)}
     if human.enabled():
         return human.human_move(sx, sy)
-    return x11.move(sx, sy)
+    return desktop.move(sx, sy)
 
 
 @mcp.tool()
@@ -285,7 +303,7 @@ def hover(x: int, y: int, settle_ms: int = 350, space: str = "screen") -> dict:
         return {"ok": False, "error": str(exc)}
     if human.enabled():
         return human.human_hover(sx, sy, settle_ms=settle_ms)
-    return x11.hover(sx, sy, settle_ms=settle_ms)
+    return desktop.hover(sx, sy, settle_ms=settle_ms)
 
 
 @mcp.tool()
@@ -298,7 +316,7 @@ def drag(from_x: int, from_y: int, to_x: int, to_y: int, space: str = "screen") 
         return {"ok": False, "error": str(exc)}
     if human.enabled():
         return human.human_drag(fx, fy, tx, ty)
-    return x11.drag(fx, fy, tx, ty)
+    return desktop.drag(fx, fy, tx, ty)
 
 
 @mcp.tool()
@@ -316,8 +334,8 @@ def scroll(direction: str, amount: int = 3, x: int | None = None, y: int | None 
     if human.enabled():
         return human.human_scroll(direction, amount=amount, x=sx, y=sy)
     if sx is None or sy is None:
-        return x11.scroll(direction, amount=amount)
-    return x11.scroll_at(sx, sy, direction, amount=amount)
+        return desktop.scroll(direction, amount=amount)
+    return desktop.scroll_at(sx, sy, direction, amount=amount)
 
 
 @mcp.tool()
@@ -333,13 +351,13 @@ def mouse_button(button: int = 1, press: bool = True, x: int | None = None,
             return {"ok": False, "error": str(exc)}
     if human.enabled():
         return human.human_mouse_button(button=button, press=press, x=sx, y=sy)
-    return (x11.mouse_down if press else x11.mouse_up)(button=button, x=sx, y=sy)
+    return (desktop.mouse_down if press else desktop.mouse_up)(button=button, x=sx, y=sy)
 
 
 @mcp.tool()
 def pointer_position() -> dict:
     """Where the pointer is now, and which window is under it."""
-    return x11.pointer_position()
+    return desktop.pointer_position()
 
 
 # ---- KEYBOARD --------------------------------------------------------------
@@ -356,7 +374,7 @@ def type_text(text: str, delay_ms: int = 40, typos: bool = False,
     fields even when requested."""
     if human.enabled():
         return human.human_type(text, typos=typos, field=field)
-    return x11.type_text(text, delay_ms=delay_ms)
+    return desktop.type_text(text, delay_ms=delay_ms)
 
 
 @mcp.tool()
@@ -365,14 +383,14 @@ def press_key(key: str) -> dict:
     'super+l', 'KP_0'."""
     if human.enabled() and key.lower() in {"return", "enter", "kp_enter"}:
         time.sleep(human.enter_delay_ms() / 1000.0)
-    return x11.press_key(key)
+    return desktop.press_key(key)
 
 
 @mcp.tool()
 def key_hold(key: str, press: bool = True) -> dict:
     """Hold or release a key across other actions (e.g. hold 'ctrl', click
     several items, release). Always release what you press."""
-    return (x11.key_down if press else x11.key_up)(key)
+    return (desktop.key_down if press else desktop.key_up)(key)
 
 
 @mcp.tool()
@@ -389,7 +407,7 @@ def wait(seconds: float = 1.0) -> dict:
 def clipboard_get(selection: str = "clipboard") -> dict:
     """Read the clipboard. selection: clipboard | primary (primary is the X
     middle-click selection, which is a different buffer)."""
-    return gtkops.call("clipboard_get", selection=selection)
+    return desktop.clipboard_get(selection=selection)
 
 
 @mcp.tool()
@@ -399,7 +417,7 @@ def clipboard_set(text: str, selection: str = "clipboard") -> dict:
     written; PRIMARY is owned by whatever last selected text and no manager
     persists it. `stored` false means no clipboard manager is running and the
     text may not outlive this call."""
-    return gtkops.call("clipboard_set", text=text, selection=selection)
+    return desktop.clipboard_set(text=text, selection=selection)
 
 
 # ---- APPLICATIONS ----------------------------------------------------------
@@ -430,21 +448,21 @@ def terminate_app(pid: int, force: bool = False) -> dict:
 def enable_accessibility(enable_web: bool = True) -> dict:
     """Turn on AT-SPI tree export. enable_web also lets Chromium/Electron export
     their web content. Orca is killed afterwards so nothing is spoken aloud."""
-    return atspi.ensure_a11y(enable_web=enable_web, silence=True)
+    return a11y.ensure_a11y(enable_web=enable_web, silence=True)
 
 
 @mcp.tool()
 def accessibility_tree(app: str | None = None, actionable_only: bool = True) -> list[dict]:
     """Dump actionable UI elements as {app, role, name, x, y, w, h} with screen
     coordinates. Filter by app name substring. Call enable_accessibility first."""
-    return atspi.tree(app=app, actionable_only=actionable_only)
+    return a11y.tree(app=app, actionable_only=actionable_only)
 
 
 @mcp.tool()
 def click_element(name: str, role: str | None = None, app: str | None = None) -> dict:
     """Find an element by role+name in the accessibility tree and click its
     center — element-accurate, no pixel guessing."""
-    return atspi.click_element(name, role=role, app=app)
+    return a11y.click_element(name, role=role, app=app)
 
 
 @mcp.tool()
@@ -453,13 +471,13 @@ def perform_element_action(name: str, action: str = "click", role: str | None = 
     """Invoke an element's own action instead of clicking at it. Works where a
     synthetic click cannot reach — occluded, scrolled, or under a pointer grab.
     Use element_actions to see what an element declares."""
-    return atspi.perform_action(name, action=action, role=role, app=app)
+    return a11y.perform_action(name, action=action, role=role, app=app)
 
 
 @mcp.tool()
 def element_actions(name: str, role: str | None = None, app: str | None = None) -> dict:
     """List the actions a toolkit declares on an element (press, activate, ...)."""
-    return atspi.element_actions(name, role=role, app=app)
+    return a11y.element_actions(name, role=role, app=app)
 
 
 @mcp.tool()
@@ -467,14 +485,14 @@ def set_element_value(name: str, value: str, role: str | None = None,
                       app: str | None = None) -> dict:
     """Set a field's contents directly. Beats click + select-all + type: no
     keystroke timing, no stray keybindings, no autocomplete corruption."""
-    return atspi.set_value(name, value, role=role, app=app)
+    return a11y.set_value(name, value, role=role, app=app)
 
 
 @mcp.tool()
 def focused_element() -> dict:
     """What currently has keyboard focus — the reliable way to confirm a click
     landed before you start typing."""
-    return atspi.focused_element()
+    return a11y.focused_element()
 
 
 @mcp.tool()
@@ -482,7 +500,7 @@ def wait_for_element(name: str, role: str | None = None, app: str | None = None,
                      timeout: float = 10.0) -> dict:
     """Block until an element appears. Better than sleeping: UI that is still
     animating in reports stale geometry."""
-    return atspi.wait_for_element(name, role=role, app=app, timeout=timeout)
+    return a11y.wait_for_element(name, role=role, app=app, timeout=timeout)
 
 
 @mcp.tool()

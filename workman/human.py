@@ -16,7 +16,7 @@ import random
 import re
 import time
 
-from . import x11
+from . import desktop
 
 CHAR_DELAY_MS = (50, 300)
 SPACE_DELAY_MS = (150, 300)
@@ -285,7 +285,7 @@ def _typo_char(ch: str, rng: random.Random) -> str | None:
 
 
 def _pointer() -> tuple[int, int]:
-    info = x11.pointer_position()
+    info = desktop.pointer_position()
     try:
         return int(info.get("x", 0) or 0), int(info.get("y", 0) or 0)
     except (TypeError, ValueError):
@@ -299,7 +299,7 @@ def human_move(x: int, y: int, rng: random.Random | None = None) -> dict:
     for i, (px, py, t_ms) in enumerate(path):
         if i > 0:
             _sleep_ms(t_ms - path[i - 1][2])
-        x11.move(px, py)
+        desktop.move(px, py)
     ax, ay = path[-1][0], path[-1][1]
     return {"ok": True, "at": [ax, ay], "target": [x, y], "points": len(path),
             "duration_ms": path[-1][2], "human": True}
@@ -313,9 +313,9 @@ def human_press_click(button: int = 1, count: int = 1,
         _sleep_ms(aim_pause_ms(rng))
     press = click_press_ms(rng)
     for i in range(max(1, int(count))):
-        x11.mouse_down(button)
+        desktop.mouse_down(button)
         _sleep_ms(press)
-        x11.mouse_up(button)
+        desktop.mouse_up(button)
         if i < count - 1:
             _sleep_ms(rng.randint(*DOUBLE_CLICK_GAP_MS))
     return press
@@ -343,14 +343,14 @@ def human_drag(from_x: int, from_y: int, to_x: int, to_y: int,
                rng: random.Random | None = None) -> dict:
     rng = resolve_rng(rng)
     human_move(from_x, from_y, rng)
-    x11.mouse_down(1)
+    desktop.mouse_down(1)
     path = eased_path(from_x, from_y, to_x, to_y, rng)
     for i, (px, py, t_ms) in enumerate(path):
         if i == 0:
             continue
         _sleep_ms(t_ms - path[i - 1][2])
-        x11.move(px, py)
-    x11.mouse_up(1)
+        desktop.move(px, py)
+    desktop.mouse_up(1)
     return {"ok": True, "from": [from_x, from_y], "to": [to_x, to_y],
             "points": len(path), "human": True}
 
@@ -368,7 +368,7 @@ def human_scroll(direction: str, amount: int = 3,
     clicks = 0
     for n, pause in plan:
         for i in range(n):
-            x11.scroll(direction, amount=1)
+            desktop.scroll(direction, amount=1)
             clicks += 1
             if i < n - 1:
                 _sleep_ms(rng.randint(*SCROLL_INTRA_MS))
@@ -388,8 +388,8 @@ def human_mouse_button(button: int = 1, press: bool = True,
         human_move(int(x), int(y), rng)
     if press:
         _sleep_ms(aim_pause_ms(rng))
-        return x11.mouse_down(button=button)
-    return x11.mouse_up(button=button)
+        return desktop.mouse_down(button=button)
+    return desktop.mouse_up(button=button)
 
 
 def human_type(text: str, rng: random.Random | None = None,
@@ -403,16 +403,16 @@ def human_type(text: str, rng: random.Random | None = None,
         if allow_typos and ch not in " \n\r" and rng.random() < TYPO_CHANCE:
             wrong = _typo_char(ch, rng)
             if wrong and wrong != ch:
-                x11.type_text(wrong, delay_ms=0)
+                desktop.type_text(wrong, delay_ms=0)
                 _sleep_ms(rng.randint(*CHAR_DELAY_MS))
-                x11.press_key("BackSpace")
+                desktop.press_key("BackSpace")
                 _sleep_ms(rng.randint(50, 150))
                 corrections += 1
         if ch in "\n\r":
             _sleep_ms(max(delay, ENTER_MIN_MS))
-            x11.press_key("Return")
+            desktop.press_key("Return")
         else:
-            x11.type_text(ch, delay_ms=0)
+            desktop.type_text(ch, delay_ms=0)
             _sleep_ms(delay)
         typed += 1
     return {"ok": True, "typed_len": typed, "human": True,

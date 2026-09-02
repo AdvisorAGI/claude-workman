@@ -73,7 +73,7 @@ class TestLaunchGuards:
         """A child that dies with the server would take the user's app with it."""
         monkeypatch.delenv("WORKMAN_ALLOW_LAUNCH", raising=False)
         monkeypatch.setattr(apps.shutil, "which", lambda binary: "/usr/bin/xterm")
-        monkeypatch.setattr(apps.x11, "list_windows", lambda: [])
+        monkeypatch.setattr(apps.desktop, "list_windows", lambda: [])
         captured = {}
 
         class FakeProc:
@@ -92,7 +92,7 @@ class TestLaunchGuards:
     def test_explicit_args_are_not_word_split(self, monkeypatch):
         monkeypatch.delenv("WORKMAN_ALLOW_LAUNCH", raising=False)
         monkeypatch.setattr(apps.shutil, "which", lambda binary: "/usr/bin/app")
-        monkeypatch.setattr(apps.x11, "list_windows", lambda: [])
+        monkeypatch.setattr(apps.desktop, "list_windows", lambda: [])
         captured = {}
         monkeypatch.setattr(apps.subprocess, "Popen",
                             lambda argv, **k: captured.update(argv=argv) or type("P", (), {"pid": 1}))
