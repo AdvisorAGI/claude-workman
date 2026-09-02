@@ -44,7 +44,9 @@ def run() -> None:
 
     path = fifo_path()
 
-    state = {"x": -100, "y": -100, "label": "Workman", "ripples": []}  # ripples: [(x,y,t0)]
+    # label defaults to empty: ring + ripple only, no text next to the pointer.
+    # Send "label <text>" on the FIFO to turn it back on.
+    state = {"x": -100, "y": -100, "label": "", "ripples": []}  # ripples: [(x,y,t0)]
 
     win = Gtk.Window(type=Gtk.WindowType.POPUP)
     win.set_app_paintable(True)
