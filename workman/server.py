@@ -19,7 +19,7 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import a11y, apps, bridge, chrome, desktop, human, vision
+from . import a11y, apps, bridge, chrome, desktop, human, shotlog, vision
 
 mcp = FastMCP("claude-workman")
 
@@ -72,6 +72,10 @@ def screenshot(max_dim: int | None = None, full_resolution: bool = False,
             f"{meta['screen'][0]}x{meta['screen'][1]} screen — pass coordinates read "
             f"from it with space='view', or multiply them by {factor}"
         )
+    shot = shotlog.archive_capture(data, "png", "screenshot")
+    if shot:
+        meta["shot"] = shot
+    shotlog.journal("screenshot", meta)
     return [meta, Image(data=data, format="png")]
 
 
@@ -79,7 +83,10 @@ def screenshot(max_dim: int | None = None, full_resolution: bool = False,
 def screenshot_region(x: int, y: int, w: int, h: int) -> Image:
     """Capture a sub-rectangle of the screen at native resolution (faster than a
     full grab). For reading small detail, prefer `zoom`, which also magnifies."""
-    return Image(data=desktop.screenshot(region=(x, y, w, h)), format="png")
+    data = desktop.screenshot(region=(x, y, w, h))
+    shot = shotlog.archive_capture(data, "png", "screenshot_region")
+    shotlog.journal("screenshot_region", {"region": [x, y, w, h], "shot": shot})
+    return Image(data=data, format="png")
 
 
 @mcp.tool()
@@ -111,6 +118,10 @@ def zoom(x1: int, y1: int, x2: int, y2: int, space: str = "view",
                          "add the region origin before clicking"})
     if save_to_disk:
         meta["saved_to"] = vision.save(data, "jpg")
+    shot = shotlog.archive_capture(data, "jpeg", "zoom")
+    if shot:
+        meta["shot"] = shot
+    shotlog.journal("zoom", meta)
     return [meta, Image(data=data, format="jpeg")]
 
 
