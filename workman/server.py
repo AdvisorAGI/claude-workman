@@ -19,7 +19,7 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import a11y, apps, bridge, chrome, desktop, human, shotlog, vision
+from . import a11y, apps, bridge, chrome, desktop, human, session, shotlog, vision
 
 mcp = FastMCP("claude-workman")
 
@@ -811,6 +811,75 @@ def bridge_locate_and_click(selector_or_text: str, tabId: int,
     a caller can see what it aimed at.
     """
     return bridge.locate_and_click(selector_or_text, tabId, timeout_s=timeout_s)
+
+
+# ---- SESSION CONTINUITY ----------------------------------------------------
+# The context-pressure state a session and its on-call judging lane share:
+# how full the window is, the compact-or-run-on verdict, and the two memory
+# files that survive a compaction. Same files the ~/.claude hooks use, so a
+# tool call and a hook can never report different numbers.
+
+@mcp.tool()
+def session_context_status(transcript_path: str = "", session_id: str = "",
+                           cwd: str = "") -> dict:
+    """How full this session's context is, and what the on-call lane says about it.
+
+    Returns the token count (the last assistant turn's usage: input +
+    cache_creation + cache_read + output), the auto-compact `window`, the
+    `floor` below which nobody asks, the `zone` (quiet | judged | backstop),
+    percent of the window, and the current verdict if one has been written.
+
+    zone is the whole point: `quiet` means carry on, `judged` means compacting
+    is a judgement call at each turn end, `backstop` means the harness compacts
+    next turn whether or not the moment is clean. Leave transcript_path empty
+    and the session's own transcript is used, or the most recently modified one
+    on this machine. `cwd` only selects which project's memory_dir is reported.
+    """
+    return session.context_status(transcript_path=transcript_path,
+                                  session_id=session_id, cwd=cwd)
+
+
+@mcp.tool()
+def session_compact_verdict(session_id: str, compact_now: bool | None = None,
+                            reason: str = "", blockers: list[str] | None = None,
+                            handoff_current: bool | None = None) -> dict:
+    """Read the compact-or-run-on verdict for a session, or write it.
+
+    With only session_id it reads /tmp/compact-verdict.<session_id>.json and
+    reports `exists` false when nothing has judged this session yet, which the
+    hooks read as "keep running". Supply compact_now to write the verdict; the
+    object written is returned. Give a concrete one-sentence `reason` and put
+    anything mid-flight in `blockers`: the session is told both when it is
+    asked to wrap up. handoff_current left unset keeps the previous value
+    rather than silently claiming the handoff is stale.
+    """
+    return session.compact_verdict(session_id, compact_now=compact_now,
+                                   reason=reason, blockers=blockers,
+                                   handoff_current=handoff_current)
+
+
+@mcp.tool()
+def session_ledger_append(cwd: str, entries: list[str]) -> dict:
+    """Append one dated block of bullets to this project's turn-ledger.md.
+
+    The ledger is what survives a compaction, so each entry should be a
+    concrete fact with the path, command, branch, id or number in it, not a
+    summary of the conversation. `cwd` picks the project: its memory directory
+    is derived from it, and is created if missing.
+    """
+    return session.ledger_append(cwd, entries)
+
+
+@mcp.tool()
+def session_handoff(cwd: str, content: str = "") -> dict:
+    """Read this project's session-handoff-latest.md, or overwrite it.
+
+    Empty `content` reads; anything else replaces the file wholesale. Keep it
+    true right now and under 40 lines: DONE / IN FLIGHT / NEXT (exact next
+    command) / BLOCKERS / RUNNING LANES. This is the file a session resumes
+    from when the context it was holding is gone.
+    """
+    return session.handoff(cwd, content=content)
 
 
 # ---- BATCH -----------------------------------------------------------------
