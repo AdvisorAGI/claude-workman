@@ -19,7 +19,8 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import a11y, apps, bridge, chrome, desktop, human, session, shotlog, vision
+from . import (a11y, account, apps, bridge, chrome, desktop, human, session,
+               shortcuts, shotlog, vision, workspace_layout)
 
 mcp = FastMCP("claude-workman")
 
@@ -113,9 +114,39 @@ def zoom(x1: int, y1: int, x2: int, y2: int, space: str = "view",
         data, meta = vision.magnify(raw)
     except (ValueError, vision.VisionUnavailable) as exc:
         return [{"ok": False, "error": str(exc)}]
-    meta.update({"ok": True, "region_screen": [rx, ry, rx + rw, ry + rh],
-                 "note": "coordinates inside this crop are relative to it — "
-                         "add the region origin before clicking"})
+    # One capture, many targets. The caller reads several coordinates off this
+    # one image and maps each back to the screen, so the mapping is returned
+    # rather than left to be derived from `magnification`, which is the wrong
+    # number to derive it from: magnification is the image measured against the
+    # CROP, and a crop is whatever the backend grabbed. Measured here, the
+    # macOS grab comes back in points (a 120x80 point region gives a 120x80
+    # image), so the two happen to agree; a backend that grabs a 2x display in
+    # device pixels makes them differ by exactly that 2, and every mapped click
+    # then lands at half the intended offset. `factor` is the region's width in
+    # screen points over the returned image's width, so it is right either way
+    # and the caller never has to know which kind of grab it got.
+    image_w, image_h = (meta.get("magnified") or [rw, rh])[:2]
+    image_w, image_h = int(image_w) or rw, int(image_h) or rh
+    factor_x, factor_y = rw / image_w, rh / image_h
+    meta.update({
+        "ok": True,
+        "region_screen": [rx, ry, rx + rw, ry + rh],
+        "origin": [rx, ry],
+        "factor": round((factor_x + factor_y) / 2, 6),
+        "factor_xy": [round(factor_x, 6), round(factor_y, 6)],
+        "to_screen": "screen_x = origin[0] + image_x * factor, "
+                     "screen_y = origin[1] + image_y * factor",
+        "note": "coordinates read off this image are relative to the crop and "
+                "magnified. Map each one with `to_screen` and click it with "
+                "space='screen'; several targets can be mapped from this one "
+                "capture, so plan the whole sequence before capturing again",
+    })
+    crop_w = int((meta.get("crop") or [0])[0] or 0)
+    if crop_w and crop_w != rw:
+        # A Retina grab comes back in device pixels while the region is in
+        # points. Saying so beats leaving a caller to wonder why the numbers do
+        # not divide.
+        meta["device_scale"] = round(crop_w / rw, 3)
     if save_to_disk:
         meta["saved_to"] = vision.save(data, "jpg")
     shot = shotlog.archive_capture(data, "jpeg", "zoom")
@@ -198,6 +229,49 @@ def window_geometry(query: str, x: int | None = None, y: int | None = None,
     """Move and/or resize a window. Omitted values are left alone. A maximized
     window ignores geometry, so it is unmaximized first."""
     return desktop.window_geometry(query, x=x, y=y, w=w, h=h)
+
+
+@mcp.tool()
+def window_tile(action: str, query: str = "", display: int | str | None = None,
+                prefer_menu: bool = True) -> dict:
+    """Tile a window the way the operating system tiles it: halves, quarters,
+    fill, center, and back again.
+
+    action: tile_left | tile_right | tile_top | tile_bottom | tile_top_left |
+    tile_top_right | tile_bottom_left | tile_bottom_right | fill | center |
+    tile_restore. `query` names the window or its application and defaults to
+    the active one; on a multi-window application the named window is made the
+    app's main window first, so this moves the window asked for rather than
+    whichever was in front.
+
+    On macOS this clicks the app's own Window > Move & Resize menu, so the
+    result is the system's rectangle, gap and menu bar inset included, rather
+    than one computed here. There is no keyboard route to substitute for it:
+    the built-in chords need the Globe/fn modifier, which macOS resolves below
+    the event tap and strips from a synthetic event, and the menu items carry
+    no key equivalent of their own. An application with no Window menu, a move
+    to another display, and every non-macOS backend fall back to writing a
+    computed rectangle. `route` says which one ran ('native_menu' or
+    'geometry'), `honored` compares the result against the computed tile, and
+    `activated` records that the menu route had to bring the app forward,
+    because the click only lands on the frontmost application.
+    """
+    return workspace_layout.tile(action, query=query or None, display=display,
+                                 prefer_menu=prefer_menu)
+
+
+@mcp.tool()
+def window_tile_available(query: str = "") -> dict:
+    """Which tiling actions this window's app can do natively, right now.
+
+    Reads the app's Window menu without touching it, so it is safe on a screen
+    someone is using. `available` False is a normal answer for an application
+    that has no standard Window menu; `window_tile` still works there through
+    the computed route. `actions` lists only items that are enabled, so
+    tile_restore shows up on a window that has been tiled and not on one that
+    has not.
+    """
+    return workspace_layout.native_tiling(query or None)
 
 
 @mcp.tool()
@@ -882,9 +956,59 @@ def session_handoff(cwd: str, content: str = "") -> dict:
     return session.handoff(cwd, content=content)
 
 
+# ---- ACCOUNT --------------------------------------------------------------
+# Which account this machine is signed in as, on the Claude lane and the Grok
+# lane. The plugin ships to whatever machine will have it, so nothing here may
+# assume an email address: a hook that launches a child `claude -p` has to ask
+# who the PARENT session is before it can hand the child the same identity.
+# Identity fields only, by allowlist. No token, key or credential value is read
+# by these tools, and the Grok seat is a presence check that never touches
+# XAI_API_KEY and never calls api.x.ai.
+
+@mcp.tool()
+def account_lanes(config_dir: str = "", transcript_path: str = "") -> dict:
+    """Every account lane on this machine, with the active one marked.
+
+    `claude.accounts` is one entry per config dir ($CLAUDE_CONFIG_DIR, then
+    ~/.claude, then every ~/.claude-* sibling), each carrying its config_dir,
+    the account_file it actually keeps its identity in, `logged_in`, and the
+    identity fields (emailAddress, displayName, organizationName,
+    organizationUuid, accountUuid, seatTier, billingType). `grok` reports the
+    CLI seat: installed, logged_in, auth_method, and whether an xAI key
+    variable is exported. No credential value is ever returned.
+
+    Use it to pick a lane on an unfamiliar machine: the DGX carries seven
+    config dirs and five distinct signed-in identities, so "the account" is not
+    a thing that can be assumed.
+    """
+    return account.lanes(config_dir=config_dir, transcript_path=transcript_path)
+
+
+@mcp.tool()
+def account_active(config_dir: str = "", transcript_path: str = "") -> dict:
+    """The one account lane THIS session is running on, and how that was decided.
+
+    `source` says which input won: argument, env ($CLAUDE_CONFIG_DIR),
+    transcript (the config dir is three levels above
+    <config_dir>/projects/<slug>/<session_id>.jsonl) or default (~/.claude).
+    Pass the hook payload's transcript_path when there is one; it is exact by
+    construction where a rebuilt cwd slug is not. When the env and the
+    transcript disagree the env wins and the other answer is reported as
+    `transcript_config_dir` rather than being dropped silently.
+
+    A child process launched with this config_dir runs as the same account as
+    the session that launched it, which is the whole point.
+    """
+    return account.active(config_dir=config_dir, transcript_path=transcript_path)
+
+
 # ---- BATCH -----------------------------------------------------------------
 # Non-visual actions only: interleaving images inside one result is awkward for
 # most clients, and the point here is to cut round-trips on action sequences.
+# One shape does not fit: a step names its tool in the key "action", so a tool
+# that takes its own `action` argument cannot be reached through here at all.
+# window_tile is deliberately absent for that reason rather than listed and
+# broken; call it directly.
 _BATCH_OPS = {
     "click": click, "move": move, "hover": hover, "drag": drag, "scroll": scroll,
     "mouse_button": mouse_button, "type_text": type_text, "press_key": press_key,
@@ -946,7 +1070,116 @@ def batch(actions: list[dict], stop_on_error: bool = True) -> dict:
             "requested": len(actions), "results": results}
 
 
+# --------------------------------------------------------------- human mode
+# Working the screen the way a person does: know the machine's own key chords
+# instead of clicking through menus, and put windows where a person would --
+# one task filling the screen, two side by side, three at the hard ceiling.
+
+
+@mcp.tool()
+def shortcut(action: str, app: str | None = None,
+             platform: str | None = None) -> dict:
+    """The native key chord for an action on this machine, in xdotool syntax.
+
+    Reach for this before clicking through a menu. `app` narrows to that app's
+    own bindings ('chrome', 'files', 'terminal', 'vscode'); `platform` overrides
+    detection ('darwin', 'linux', 'win32') to look up another machine's chord.
+
+    Never raises and never guesses. An action a platform genuinely has no chord
+    for comes back with keys=None plus a note saying what to do instead, and
+    with a `route` naming the tool that does the job. macOS window-halving is
+    the example: its chords are Globe(fn) plus an arrow, and macOS resolves fn
+    below the event tap, so a synthetic event arrives with the flag stripped
+    and nothing happens. Measured, so that it is not an excuse: posting Delete
+    (keycode 51) with kCGEventFlagMaskSecondaryFn set left the text untouched,
+    while plain ForwardDelete removed a character. Those rows therefore point
+    at window_tile, which drives the same feature through the Window > Move &
+    Resize menu. A misspelling comes back with suggestions.
+    """
+    return shortcuts.resolve(action, app=app, platform=platform)
+
+
+@mcp.tool()
+def shortcut_many(actions: list[str], app: str | None = None,
+                  platform: str | None = None) -> list[dict]:
+    """Resolve several chords in one round-trip. Same rules as `shortcut`."""
+    return shortcuts.lookup_many(actions, app=app, platform=platform)
+
+
+@mcp.tool()
+def shortcut_list(app: str | None = None, platform: str | None = None,
+                  group: str | None = None) -> list[dict]:
+    """Every action that has a chord here, for finding out what is available.
+
+    Filter with `group`: window, tabs, navigation, editing, text_motion, system,
+    app. Read this before deciding a task needs the mouse.
+    """
+    return shortcuts.list_actions(app=app, platform=platform, group=group)
+
+
+@mcp.tool()
+def layout_focus(query: str, timeout_s: float = 6.0) -> dict:
+    """Bring a window forward and CONFIRM it is frontmost before you type.
+
+    Raising a window is a request, not a guarantee, so this polls the frontmost
+    window until it matches or the timeout passes. Typing into whatever happened
+    to be in front is the standard way this goes wrong, and `verified` in the
+    reply is what tells you it did not.
+    """
+    return workspace_layout.focus_and_verify(query, timeout_s=timeout_s)
+
+
+@mcp.tool()
+def layout_full(query: str | None = None, native: bool = False) -> dict:
+    """Give one window the whole working area -- the layout for a single task.
+
+    Fills the visible frame, so the menu bar and Dock are respected and the task
+    board stays reachable. `native=True` asks for real fullscreen instead, which
+    hides both and hides the board with them; leave it off unless the task is
+    watching video.
+    """
+    return workspace_layout.fullscreen(query, native=native)
+
+
+@mcp.tool()
+def layout_split(left: str, right: str, ratio: float = 0.5,
+                 display: int | str | None = None) -> dict:
+    """Two windows side by side -- the layout for comparing or referencing.
+
+    `ratio` is the left window's share (0.6 gives it three fifths). Geometry is
+    read back after the write rather than assumed: an app that enforces a
+    minimum size comes back honored=False with the per-window delta, because a
+    window that silently refused to shrink is something you need to know about.
+    """
+    return workspace_layout.split(left, right, ratio=ratio, display=display)
+
+
+@mcp.tool()
+def layout_stack(queries: list[str], display: int | str | None = None) -> dict:
+    """Up to three windows in equal columns. Three is a hard cap, not a default.
+
+    Narrower than a third of the working area stops being readable, which is the
+    same reason a person stops at three. A fourth window is refused rather than
+    squeezed in.
+    """
+    return workspace_layout.stack(queries, display=display)
+
+
+@mcp.tool()
+def layout_arrange(spec: dict) -> dict:
+    """Apply a layout from one spec: {"layout": "full"|"split"|"stack", ...}.
+
+    The declarative form of the three above -- describe the arrangement the task
+    needs and let it place the windows.
+    """
+    return workspace_layout.arrange(spec)
+
+
 def main() -> None:
+    # Human Mode is the default, not an opt-in. A session that forgets to turn
+    # it on drives a teleporting pointer across a screen someone is watching.
+    # WORKMAN_HUMAN_MODE=0 opts out.
+    human.apply_session_default()
     # Extension retries ws://127.0.0.1:8765/workman forever; be there on boot.
     # A bind failure must not take down the MCP server.
     try:

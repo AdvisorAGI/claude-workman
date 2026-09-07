@@ -11,7 +11,11 @@ tests are deterministic; in real use the seed varies per session.
 """
 from __future__ import annotations
 
+import inspect
+import json
 import math
+import os
+import pathlib
 import random
 import re
 import time
@@ -52,18 +56,87 @@ _NEIGHBORS = {
     "z": "asx",
 }
 
-_state: dict = {"on": False, "seed": None, "rng": None}
+_state: dict = {"on": False, "seed": None, "rng": None, "persist": True}
 
 
 def reset() -> None:
-    """Return session state to the default (off, no seed). For tests."""
+    """Return session state to the default (off, no seed). For tests.
+
+    Also turns persistence off for the rest of the process, so a test that
+    flips Human Mode never writes the real switch file. Nothing in the server
+    calls this; it exists for the autouse fixtures.
+    """
     _state["on"] = False
     _state["seed"] = None
     _state["rng"] = None
+    _state["persist"] = False
 
 
-def set_mode(on: bool, seed: int | None = None) -> dict:
-    """Store the Human Mode flag and a seedable RNG in module state."""
+# The Human Mode switch is one flag in one file, shared with the atmos_computer
+# daemon (which reads the same "human" key). Two servers, one switch, so
+# "turn human mode off" cannot half-land. WORKMAN_HUMAN_STATE redirects it.
+STATE_FILENAME = "settings.json"
+
+
+def state_path() -> pathlib.Path:
+    """The one switch file, resolved exactly the way the daemon resolves it.
+
+    ``atmos_computer.protocol`` uses ``WORKMAN_HOME`` or the literal
+    ``~/Library/Application Support/Workman`` on every platform, with no
+    darwin branch. Mirroring that verbatim is the whole point: a second
+    opinion about where the file lives would silently split the switch in two.
+    """
+    override = os.environ.get("WORKMAN_HUMAN_STATE", "").strip()
+    if override:
+        return pathlib.Path(override).expanduser()
+    home = os.environ.get("WORKMAN_HOME", "~/Library/Application Support/Workman")
+    return pathlib.Path(home).expanduser() / STATE_FILENAME
+
+
+def read_persisted() -> bool | None:
+    """The persisted flag, or None when nothing has been switched yet."""
+    try:
+        with open(state_path(), encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, ValueError):
+        return None
+    value = data.get("human")
+    return None if value is None else bool(value)
+
+
+def write_persisted(on: bool) -> bool:
+    """Store the flag beside the daemon's own settings. Never raises.
+
+    Merges rather than overwrites: the same file carries the learner DSN.
+    """
+    path = pathlib.Path(state_path())
+    try:
+        try:
+            with open(path, encoding="utf-8") as fh:
+                data = json.load(fh)
+            if not isinstance(data, dict):
+                data = {}
+        except (OSError, ValueError):
+            data = {}
+        data["human"] = bool(on)
+        path.parent.mkdir(parents=True, exist_ok=True)
+        tmp = path.with_suffix(path.suffix + ".tmp")
+        with open(tmp, "w", encoding="utf-8") as fh:
+            json.dump(data, fh, indent=1)
+        os.replace(tmp, path)
+        return True
+    except OSError:
+        return False
+
+
+def set_mode(on: bool, seed: int | None = None, persist: bool | None = None) -> dict:
+    """Store the Human Mode flag and a seedable RNG, and remember the choice.
+
+    Persisting is the point of the switch: when the owner says turn it off, it
+    stays off across restarts and across both workman surfaces. ``persist``
+    forces the behaviour either way; the default is to persist unless
+    ``reset()`` has marked this process as a test.
+    """
     _state["on"] = bool(on)
     if seed is not None:
         _state["seed"] = int(seed)
@@ -73,6 +146,9 @@ def set_mode(on: bool, seed: int | None = None) -> dict:
         _state["rng"] = random.Random(_state["seed"])
     else:
         _state["rng"] = None
+    should = _state["persist"] if persist is None else bool(persist)
+    if should:
+        write_persisted(bool(on))
     return get_mode()
 
 
@@ -82,6 +158,39 @@ def get_mode() -> dict:
 
 def enabled() -> bool:
     return bool(_state["on"])
+
+
+def apply_session_default() -> dict:
+    """Turn Human Mode on for a fresh session unless the environment says not to.
+
+    Human Mode is the default because the failure mode of forgetting it is
+    invisible and expensive: the pointer teleports, hover-driven UI never
+    fires, and anything watching input timing sees a machine. `reset()` stays
+    the way it was, off, because tests depend on that being the neutral state;
+    this is the product default, applied once when the server starts.
+
+    The switch beats the default. ``workman-switch human off`` (or the
+    ``workman_set_human_mode`` tool) writes the flag to the shared state file,
+    and this reads it back, so an off survives a restart. Only when nothing
+    has ever been switched does the on-by-default apply.
+
+    Set ``WORKMAN_HUMAN_MODE=0`` for a fast, non-humanised session; the
+    environment still wins over both, for one process.
+    """
+    raw = os.environ.get("WORKMAN_HUMAN_MODE", "").strip().lower()
+    if raw in {"0", "off", "false", "no"}:
+        return get_mode()
+    if raw in {"1", "on", "true", "yes"}:
+        if not _state["on"]:
+            set_mode(True, persist=False)
+        return get_mode()
+    persisted = read_persisted()
+    want = True if persisted is None else persisted
+    if want and not _state["on"]:
+        set_mode(True, persist=False)
+    elif not want and _state["on"]:
+        set_mode(False, persist=False)
+    return get_mode()
 
 
 def resolve_rng(rng: random.Random | None = None) -> random.Random:
@@ -392,18 +501,98 @@ def human_mouse_button(button: int = 1, press: bool = True,
     return desktop.mouse_up(button=button)
 
 
+# Typing one character at a time is what makes the cadence human, and Human
+# Mode wants those characters to be real virtual keycodes rather than unicode
+# payloads on keycode 0, because a payload event carries no keyCode and anything
+# watching the keyboard can see that. desktop.type_text is a fixed two argument
+# dispatcher, so the flag has to reach the backend itself. The dispatcher is
+# captured at import: while it is still the one we captured, going straight to
+# the backend is the same call it would have made, and once a caller has
+# replaced it (a test double, a recorder) that replacement is what they meant to
+# run, so it is used as it is.
+_DISPATCH_TYPE_TEXT = desktop.type_text
+_TYPER_CACHE: dict = {"for": None, "typer": None, "real": False}
+
+
+def _accepts_real_keys(fn) -> bool:
+    try:
+        return "real_keys" in inspect.signature(fn).parameters
+    except (TypeError, ValueError):
+        return False
+
+
+def _typer() -> tuple:
+    """(function that types one character, whether it sends real keycodes).
+
+    Probed once per typer rather than per character: the linux and win32
+    backends take no real_keys argument, and asking them every keystroke would
+    turn a missing feature into a stream of exceptions.
+    """
+    fn = desktop.type_text
+    if _TYPER_CACHE["for"] is fn:
+        return _TYPER_CACHE["typer"], _TYPER_CACHE["real"]
+    keyed = None
+    if fn is _DISPATCH_TYPE_TEXT:
+        try:
+            candidate = getattr(desktop.backend(), "type_text", None)
+        except Exception:
+            candidate = None
+        if candidate is not None and _accepts_real_keys(candidate):
+            keyed = candidate
+
+    if keyed is None:
+        def typer(ch: str) -> dict:
+            return fn(ch, delay_ms=0)
+    else:
+        def typer(ch: str) -> dict:
+            return keyed(ch, delay_ms=0, real_keys=True)
+
+    real = keyed is not None
+    _TYPER_CACHE.update({"for": fn, "typer": typer, "real": real})
+    return typer, real
+
+
+def _run_via(vias: list[str]) -> str | None:
+    """One via for a whole typing run.
+
+    A keycode anywhere in the run means the run was typed on real keys, since
+    only the characters that have no key on this layout fall back to unicode.
+    """
+    for via in vias:
+        if via and "keycode" in via:
+            return via
+    return vias[-1] if vias else None
+
+
 def human_type(text: str, rng: random.Random | None = None,
                typos: bool = False, field: str = "") -> dict:
     rng = resolve_rng(rng)
     allow_typos = bool(typos) and not sensitive_field(field, text)
     delays = typing_cadence(text, rng)
+    type_one, real_keys = _typer()
     typed = 0
     corrections = 0
+    vias: list[str] = []
+    fallbacks = 0
+
+    def send(ch: str) -> None:
+        nonlocal fallbacks
+        result = type_one(ch)
+        if not isinstance(result, dict):
+            return
+        via = result.get("via")
+        if via:
+            vias.append(via)
+        try:
+            fallbacks += int(result.get("unicode_fallbacks") or 0)
+        except (TypeError, ValueError):
+            pass
+
     for ch, delay in zip(text, delays):
         if allow_typos and ch not in " \n\r" and rng.random() < TYPO_CHANCE:
             wrong = _typo_char(ch, rng)
             if wrong and wrong != ch:
-                desktop.type_text(wrong, delay_ms=0)
+                send(wrong)
                 _sleep_ms(rng.randint(*CHAR_DELAY_MS))
                 desktop.press_key("BackSpace")
                 _sleep_ms(rng.randint(50, 150))
@@ -412,8 +601,10 @@ def human_type(text: str, rng: random.Random | None = None,
             _sleep_ms(max(delay, ENTER_MIN_MS))
             desktop.press_key("Return")
         else:
-            desktop.type_text(ch, delay_ms=0)
+            send(ch)
             _sleep_ms(delay)
         typed += 1
     return {"ok": True, "typed_len": typed, "human": True,
-            "typos": allow_typos, "corrections": corrections}
+            "typos": allow_typos, "corrections": corrections,
+            "real_keys": real_keys, "via": _run_via(vias),
+            "unicode_fallbacks": fallbacks}

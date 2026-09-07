@@ -135,7 +135,7 @@ class TestMemoryDir:
             home / ".claude" / "projects" / "-Users-x-Repo" / "memory")
 
     def test_a_different_cwd_gives_a_different_dir(self, home):
-        assert session.memory_dir("/home/monzurul/x") != session.memory_dir("/Users/x/Repo")
+        assert session.memory_dir("/home/dev/x") != session.memory_dir("/Users/x/Repo")
 
     def test_empty_cwd_uses_the_process_cwd(self, home):
         assert session.memory_dir("") == session.memory_dir(os.getcwd())
@@ -244,13 +244,13 @@ class TestCompactVerdict:
 
 class TestLedger:
     def test_creates_the_ledger_with_a_dated_block(self, home):
-        out = session.ledger_append("/Users/x/Repo", ["ran gate: 14 failed", "PR #80 merged"])
+        out = session.ledger_append("/Users/x/Repo", ["first bullet", "second bullet"])
         assert out["ok"] is True and out["bullets"] == 2 and out["created"] is True
         text = (home / ".claude" / "projects" / "-Users-x-Repo" / "memory"
                 / "turn-ledger.md").read_text(encoding="utf-8")
         assert text.startswith("## ")
-        assert "- ran gate: 14 failed\n" in text
-        assert "- PR #80 merged\n" in text
+        assert "- first bullet\n" in text
+        assert "- second bullet\n" in text
 
     def test_appends_without_losing_the_previous_block(self, home):
         session.ledger_append("/Users/x/Repo", ["first"])
@@ -276,8 +276,8 @@ class TestLedger:
         assert not (home / ".claude" / "projects" / "-Users-x-Repo").exists()
 
     def test_writes_under_the_project_derived_from_cwd(self, home):
-        out = session.ledger_append("/home/monzurul/agentx", ["dgx side"])
-        assert "/-home-monzurul-agentx/memory/turn-ledger.md" in out["path"]
+        out = session.ledger_append("/home/dev/other", ["dgx side"])
+        assert "/-home-dev-other/memory/turn-ledger.md" in out["path"]
 
 
 class TestHandoff:

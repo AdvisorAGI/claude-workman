@@ -50,6 +50,25 @@ def _quartz():
     return _quartz_mod
 
 
+# An MCP host can hand us a PATH without the system directories - a Claude Code
+# or launchd spawn inherits only /opt/homebrew/bin:/usr/local/bin:/usr/bin:/bin -
+# so `screencapture` and `sips` resolve to nothing. _run turns that into
+# FileNotFoundError, which surfaces as the "grant Screen Recording" message even
+# though the grant is fine. Put the standard macOS locations back once, at import.
+_SYSTEM_PATHS = ("/usr/bin", "/bin", "/usr/sbin", "/sbin",
+                 "/opt/homebrew/bin", "/usr/local/bin")
+
+
+def _repair_path() -> None:
+    have = [p for p in os.environ.get("PATH", "").split(os.pathsep) if p]
+    missing = [p for p in _SYSTEM_PATHS if p not in have]
+    if missing:
+        os.environ["PATH"] = os.pathsep.join(have + missing)
+
+
+_repair_path()
+
+
 def _run(cmd: list[str], timeout: int = 20, **kw) -> subprocess.CompletedProcess:
     """Run a helper, treating "not installed" as a failed run rather than an
     exception. This module is imported and introspected on non-macOS hosts (the
@@ -372,6 +391,41 @@ def keycode_for(name: str) -> tuple[int | None, bool]:
     return None, False
 
 
+# A literal character and the key name that produces it on a US layout. Only
+# the name is stored: the keycode still comes from the two tables above through
+# keycode_for, so there is one source of truth for what a key is.
+_CHAR_KEY_NAMES = {
+    " ": "space", "\n": "return", "\r": "return", "\t": "tab",
+    "-": "minus", "=": "equal", "[": "bracketleft", "]": "bracketright",
+    "\\": "backslash", ";": "semicolon", "'": "apostrophe", "`": "grave",
+    ",": "comma", ".": "period", "/": "slash",
+    "+": "plus", "_": "underscore", ":": "colon", "?": "question",
+    "!": "exclam", "@": "at", "#": "numbersign", "$": "dollar",
+    "%": "percent", "^": "asciicircum", "&": "ampersand", "*": "asterisk",
+    "(": "parenleft", ")": "parenright", "{": "braceleft", "}": "braceright",
+    "<": "less", ">": "greater", "|": "bar", '"': "quotedbl", "~": "asciitilde",
+}
+
+
+def char_keycode(ch: str) -> tuple[int | None, bool]:
+    """(virtual keycode, needs_shift) for one literal character.
+
+    A character that has no key on a US layout, an accented letter or an emoji,
+    returns None so the caller can send it as a unicode payload instead.
+    """
+    if not ch or len(ch) != 1:
+        return None, False
+    if ch.isascii() and ch.isalpha():
+        code, _ = keycode_for(ch.lower())
+        return code, ch.isupper()
+    if ch.isascii() and ch.isdigit():
+        return _KEYCODES.get(ch), False
+    name = _CHAR_KEY_NAMES.get(ch)
+    if name is None:
+        return None, False
+    return keycode_for(name)
+
+
 def _flags_for(mods: list[str]) -> int:
     value = 0
     for m in mods:
@@ -587,6 +641,27 @@ def _post_key(code: int, down: bool, flags: int = 0) -> bool:
     return True
 
 
+def _post_key_exact(code: int, down: bool, flags: int = 0) -> bool:
+    """Post a key carrying exactly these modifiers and no others.
+
+    An event built with no source inherits whatever the session currently
+    believes is held, and posting a shifted character latches shift there, so a
+    run of characters that says nothing about its flags comes out shifted from
+    the first capital onwards. Measured on this machine: "hello WORLD 123"
+    arrived as "hello WORLD !@#" and the session was left with shift stuck on.
+    Typing therefore states its flags on every event. _post_key keeps the
+    inherit-when-zero behaviour on purpose, because that is what lets a
+    key_down modifier stay held across the keys pressed under it.
+    """
+    Q = _quartz()
+    if Q is None:
+        return False
+    ev = Q.CGEventCreateKeyboardEvent(None, code, down)
+    Q.CGEventSetFlags(ev, flags)
+    Q.CGEventPost(Q.kCGHIDEventTap, ev)
+    return True
+
+
 def press_key(key: str) -> dict:
     """xdotool key syntax, translated: 'Return', 'ctrl+c', 'super+l', 'KP_0'.
     `super` is Command here, so a model can write one combo for every OS."""
@@ -636,24 +711,57 @@ def key_up(key: str) -> dict:
                             "held keys need pyobjc-framework-Quartz")
 
 
-def type_text(text: str, delay_ms: int = 40) -> dict:
+def type_text(text: str, delay_ms: int = 40, *, real_keys: bool = False) -> dict:
     """Type a literal string.
 
-    Quartz sends each character as a unicode payload rather than a keycode, so
-    the text is layout-independent: an accented character or an emoji arrives
-    intact on a keyboard that has no key for it.
+    The default sends each character as a unicode payload rather than a
+    keycode, so the text is layout-independent: an accented character or an
+    emoji arrives intact on a keyboard that has no key for it. The cost is that
+    the event carries keycode 0, so anything reading keyCode or event.code sees
+    nothing usable and can tell the typing apart from a keyboard.
+
+    real_keys sends the virtual keycode for every character that has a key on
+    this layout, which is what a physical keyboard sends. Characters with no key
+    still go as a unicode payload, so an emoji in the middle of a sentence
+    arrives intact either way.
     """
     Q = _quartz()
     if Q is not None:
+        keyed = 0
+        fallbacks = 0
         for ch in text:
-            ev = Q.CGEventCreateKeyboardEvent(None, 0, True)
-            Q.CGEventKeyboardSetUnicodeString(ev, len(ch), ch)
-            Q.CGEventPost(Q.kCGHIDEventTap, ev)
-            up = Q.CGEventCreateKeyboardEvent(None, 0, False)
-            Q.CGEventKeyboardSetUnicodeString(up, len(ch), ch)
-            Q.CGEventPost(Q.kCGHIDEventTap, up)
+            code, needs_shift = char_keycode(ch) if real_keys else (None, False)
+            if code is not None:
+                flags = _CG_FLAGS["shift"] if needs_shift else 0
+                # Press shift as a key, not only as a flag on the character.
+                # A flag alone latches in the session's modifier state, so a
+                # string ending on a capital or on '!' would leave shift stuck
+                # down for whatever the user does next, and the Return that
+                # human typing sends after a line would arrive as shift+Return.
+                # Bracketing is also what a keyboard does, so a page watching
+                # the keyboard sees the shift key itself.
+                if flags:
+                    _post_key_exact(_MOD_KEYCODE["shift"], True, flags)
+                _post_key_exact(code, True, flags)
+                _post_key_exact(code, False, flags)
+                if flags:
+                    _post_key_exact(_MOD_KEYCODE["shift"], False, 0)
+                keyed += 1
+            else:
+                # UniChar count, not character count: an emoji outside the basic
+                # plane is one Python character but two UTF-16 units, and
+                # passing 1 sends half a surrogate pair.
+                units = len(ch.encode("utf-16-le")) // 2
+                for down in (True, False):
+                    ev = Q.CGEventCreateKeyboardEvent(None, 0, down)
+                    Q.CGEventSetFlags(ev, 0)
+                    Q.CGEventKeyboardSetUnicodeString(ev, units, ch)
+                    Q.CGEventPost(Q.kCGHIDEventTap, ev)
+                fallbacks += 1
             time.sleep(max(0, delay_ms) / 1000.0)
-        return {"ok": True, "typed_len": len(text), "via": "quartz"}
+        return {"ok": True, "typed_len": len(text),
+                "via": "quartz-keycode" if keyed else "quartz-unicode",
+                "unicode_fallbacks": fallbacks}
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     res = _osa(f'tell application "System Events" to keystroke "{escaped}"')
     if res.returncode == 0:
