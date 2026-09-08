@@ -10,6 +10,25 @@ import onboarding
 mcp = FastMCP("Workman Fleet v1.1")
 
 
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+async def fleet_observe(node: str, query: str | None = None, receipt_id: str | None = None,
+                        view: str = "compact", observation_id: str | None = None) -> CallToolResult:
+    """Opt-in compact inspection, no capture or input. Query filters active-app windows
+    only; count/identity/ambiguity are not element or global-window proof. Keeps
+    permission, STOP switches, lease/focus, reporting and validated action/visual
+    receipts. Null field_revision, load_state and exact_readback are unmeasured.
+    Always retain independent global visual checks and exact readback when needed.
+    view=full with the returned observation_id recalls the original for 30 seconds,
+    in this process only, with no new remote call. No persistent raw observation
+    cache or style/model change. Unknown states never authorize input.
+    """
+    import observation
+    result = await observation.observe(node, query, receipt_id, view, observation_id)
+    # One JSON text representation, matching fleet_control. Avoid duplicating
+    # the same observation in automatic structuredContent and text payloads.
+    return CallToolResult(content=[TextContent(type="text", text=json.dumps(result, separators=(",", ":")))])
+
+
 @mcp.resource("workman://tests/{test_id}/raw-style", mime_type="text/markdown")
 def raw_test_style(test_id: str) -> str:
     """Exact pinned Markdown for an explicitly selected Workman test; no hooks."""

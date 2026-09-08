@@ -231,9 +231,10 @@ class Backend:
             button = a.get("button", "left")
             kwargs = {"button": button} if self.mac else {"button": 3 if button == "right" else 1, "count": 2 if button == "double" else 1}
             if self.mac:
-                start = self.call("cursor_pos")
-                kwargs.update(humanize=a.get("motion", "direct") == "human",
-                              duration_ms=motion_profile.duration_ms((start["x"], start["y"]), (a["x"], a["y"]), a.get("speed", 1)))
+                kwargs["humanize"] = a.get("motion", "direct") == "human"
+                if kwargs["humanize"]:
+                    start = self.call("cursor_pos")
+                    kwargs["duration_ms"] = motion_profile.duration_ms((start["x"], start["y"]), (a["x"], a["y"]), a.get("speed", 1))
             elif a.get("motion", "direct") == "human":
                 self.move(a)
                 input_switch.check("click")
@@ -310,6 +311,8 @@ class Backend:
         smooth = a.get("motion", "direct") == "human"
         speed = a.get("speed", 1)
         if self.mac:
+            if not smooth:
+                return self.call("move", x=a["x"], y=a["y"], humanize=False)
             p = self.call("cursor_pos")
             return self.call("move", x=a["x"], y=a["y"], humanize=smooth,
                              duration_ms=motion_profile.duration_ms((p["x"], p["y"]), (a["x"], a["y"]), speed))
@@ -415,6 +418,8 @@ def run(request, backend_factory=Backend):
         else:
             with lease.hold(event.get("session", "unattributed"), action):
                 result = backend_factory(request.get("backend")).execute(action, args)
+                if action == "inspect":
+                    result["lease"] = lease.status(event.get("session", "unattributed"))
         event.update(ok=True, code="ok")
         if action in ("type", "paste"):
             event["typed_chars"] = len(args["text"])

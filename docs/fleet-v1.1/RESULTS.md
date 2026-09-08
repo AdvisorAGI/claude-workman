@@ -1,5 +1,13 @@
 # Workman fleet v1.1 verification
 
+Latest addition, 2026-09-08 00:51 UTC: opt-in `fleet_observe` is installed as the
+eighth tool; **456 tests pass**. A live read-only DGX capsule was 11.597% smaller
+than the equivalent full response with the same receipt. This is not a total-token
+claim. Mac direct-input optimization is tested in source but not deployed to the
+reserved Macs. See [OBSERVATION.md](OBSERVATION.md). The initial checkpoint and
+the earlier verification below remain preserved; their 432-test/seven-tool
+figures describe that checkpoint, not the latest installed package.
+
 Updated 2026-09-08 UTC. The implementation is packaged and installed locally.
 Fleet acceptance is still partial: machome needs human privacy grants, the Air
 workflow benchmark was interrupted and released for credential work, and the

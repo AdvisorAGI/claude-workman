@@ -7,7 +7,8 @@ claude-workman 0.3.0 and macOS helper 0.2.0.
 ## Use
 
 MCP tools: `fleet_control`, `fleet_recall`, `fleet_report`, `fleet_memory`,
-`fleet_verify`, `fleet_onboard`, `fleet_test_mode`. Supported nodes: `dgx`, `mini`, `air`, `machome`.
+`fleet_verify`, `fleet_onboard`, `fleet_test_mode`, `fleet_observe`.
+Supported nodes: `dgx`, `mini`, `air`, `machome`.
 Read the bundled fleet-control skill before desktop work.
 
 The equivalent CLI is `scripts/fleet-wm NODE ACTION`; supply action arguments
@@ -127,3 +128,18 @@ telemetry, model calls, global style setting or doctrine changes are installed.
 Registering an MCP reference does not launch/connect its server. See the
 `test-providers` schema and project `CAVEMAN_TEST.md`. No raw-Caveman model-token
 or cost improvement is claimed before matched live measurement.
+
+## Compact observations
+
+`fleet_observe` is an opt-in read-only projection of `inspect`. A nonsecret
+`query` filters active-application windows only. It preserves candidate counts,
+identity, ambiguity, focus, permissions, input switches, lease and report receipts.
+Field revision, page load and exact field readback stay explicitly unmeasured.
+Independent global visual checks remain necessary. New diagnostics, failures or
+unavailable readiness retain the full original. `view:full` and the returned
+`observation_id` retrieve the original without another remote call for 30 seconds.
+The bounded process-memory cache holds at most eight 256 KiB encoded observations;
+access expires after 30 seconds, with eviction on requests or process exit. No
+raw observation is persisted. Missing information never authorizes input.
+See project `OBSERVATION.md` for the versioned interface and measurements. Payload
+byte reduction is not total-provider token reduction or a promised speedup.

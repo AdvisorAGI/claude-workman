@@ -119,3 +119,16 @@ authorized experiment; the current source is pinned and license-preserved.
 `workman://tests/{test_id}/raw-style` provides the exact Markdown to MCP clients.
 Provider metadata never grants input, credentials, network or model-call access.
 Do not claim model/token/cost savings from the successful interface checks.
+
+## Compact observation option
+
+`fleet_observe(node, query?, receipt_id?)` projects an actual read-only inspection.
+The query matches WINDOW titles within the active application only. Counts and
+ambiguity are retained; it does not prove an element match or scan all apps.
+It retains live permission/OFF/lease/focus and reporting state. Null field
+revision, load state and exact readback mean unmeasured. Retain independent global
+visual verification and exact readback. Failures/unrecognized diagnostics include
+the original in full. `view:full, observation_id:...` retrieves the original for
+30 seconds without a new inspection. Cached state never authorizes input. Current
+corrections to action/capture/verification evidence invalidate visual receipts.
+Use this only when it helps the current task; no target token saving is assumed.

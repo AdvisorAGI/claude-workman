@@ -1,0 +1,110 @@
+{
+  "schema_version": 1,
+  "fleet_version": "1.1",
+  "status": "compact_observation_installed_mac_direct_optimization_source_only",
+  "tests": {
+    "passed": 456,
+    "seconds": 2.03,
+    "exit": 0
+  },
+  "installed": {
+    "installed_version": "1.1.0+codex.20260908005141",
+    "tools": [
+      "fleet_observe",
+      "fleet_test_mode",
+      "fleet_onboard",
+      "fleet_control",
+      "fleet_recall",
+      "fleet_report",
+      "fleet_memory",
+      "fleet_verify"
+    ],
+    "device": "dgx",
+    "observed_at": "2026-09-08T00:51:42Z",
+    "inspection_event": "041d0872919045ccb18cc661279fac98",
+    "full_original_retrieved": true,
+    "same_receipt": true,
+    "guards_preserved": true,
+    "fallback": null,
+    "ordinary_inspect_body_bytes": 1804,
+    "equivalent_full_with_receipt_text_bytes": 2354,
+    "compact_text_bytes": 2081,
+    "equivalent_text_byte_reduction_percent": 11.597281223449452,
+    "single_representation": true,
+    "inspection_round_trip_ms": 370.96456199651584,
+    "cached_full_round_trip_ms": 3.9414630009559914,
+    "provider_total_tokens": null,
+    "model_calls": 0,
+    "screen_capture": false,
+    "desktop_input": false,
+    "scope": "One installed MCP read-only inspection. Historical verified click receipt is evidence of that earlier fixture action, not present task completion. One latency sample is not a speed benchmark."
+  },
+  "synthetic_payloads": {
+    "scope": "Synthetic active-app window inventories; JSON payload only; no desktop or provider calls.",
+    "trials": [
+      {
+        "synthetic_windows": 1,
+        "candidate_count": 1,
+        "ambiguity": "unique",
+        "full_json_bytes": 1125,
+        "compact_json_bytes": 1034,
+        "byte_reduction_percent": 8.08888888888889,
+        "projection_median_ms": 0.005056
+      },
+      {
+        "synthetic_windows": 5,
+        "candidate_count": 2,
+        "ambiguity": "ambiguous",
+        "full_json_bytes": 1512,
+        "compact_json_bytes": 1055,
+        "byte_reduction_percent": 30.22486772486772,
+        "projection_median_ms": 0.0064
+      },
+      {
+        "synthetic_windows": 20,
+        "candidate_count": 2,
+        "ambiguity": "ambiguous",
+        "full_json_bytes": 3003,
+        "compact_json_bytes": 1055,
+        "byte_reduction_percent": 64.86846486846487,
+        "projection_median_ms": 0.011064000000000001
+      },
+      {
+        "synthetic_windows": 100,
+        "candidate_count": 2,
+        "ambiguity": "ambiguous",
+        "full_json_bytes": 11004,
+        "compact_json_bytes": 1055,
+        "byte_reduction_percent": 90.41257724463831,
+        "projection_median_ms": 0.035905
+      }
+    ],
+    "provider_total_tokens": null,
+    "cost": null,
+    "limitation": "Total-token target is unproven. Small observations may grow. Exact readback and global visual checks remain mandatory."
+  },
+  "air_permission_observation": {
+    "checked_at": "2026-09-08T00:40:18Z",
+    "ok": true,
+    "permissions": {
+      "screen_recording": true,
+      "accessibility": true
+    },
+    "local_recorded": true,
+    "reporting": {
+      "ok": true,
+      "received": 1
+    },
+    "event_id": "08995b00491b4187864b7fdc6546586b",
+    "scope": "Read-only grant check. No capture/input, no lease acquisition; coordinator reservation remains."
+  },
+  "target_total_token_reduction_percent": [
+    70,
+    80
+  ],
+  "target_verified": false,
+  "no_new_model_api_calls": true,
+  "no_screen_capture_or_input_in_this_addition": true,
+  "mac_deployment": "pending device release; existing installed adapters preserved",
+  "raw_caveman": "test only, default off; no doctrine change"
+}
