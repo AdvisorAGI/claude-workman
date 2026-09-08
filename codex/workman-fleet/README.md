@@ -54,6 +54,9 @@ over existing SSH. Other reporter modes remain unchanged. No reporter token,
 HTTP listener, model API, transcript scan or new scheduler is used by this path.
 DGX receipt is separate from action success. STOP returns before delivery to avoid waiting for reporter I/O; the next fleet call/report collects its durable local event.
 `fleet_report` retries delivery, never the desktop action.
+Journal files rotate into private append-only segments after 4 MiB. Segments are
+retained and read as one evidence family, so rotation bounds individual files
+without deleting history. API batches remain limited to 500 events.
 
 DGX stores per-device evidence under `~/autonomy/learnings/by-device`, lessons
 under `knowledge/WORKMAN-FLEET-V1.1.md`, and a SQLite graph projection in
@@ -105,6 +108,11 @@ Without capture, use the numbered plain-text requirements. No TCC writes.
 
 `inspect` batches status, fresh active identity and pointer without capture.
 `move`/`click` accept `motion:direct|human` and `speed:0.25..4`; direct is default.
+Documented choices are direct at 1.0, careful human motion at 0.7, smooth at
+1.0, and responsive human motion at 1.5. These are per-call choices. Successful
+and failed move/click events retain only the requested motion and bounded speed;
+when the backend supplies them, sanitized step count, duration and humanized
+outcome also reach the journal and DGX graph. Coordinates are never retained.
 The `paste` action requires `preset:first_party_fast`, an explicitly authorized
 `surface` and fresh `expect_focus`. It uses the existing clipboard backend for
 ordinary nonsecret multiline text. Prior clipboard contents are replaced and
@@ -131,7 +139,13 @@ or cost improvement is claimed before matched live measurement.
 
 ## Compact observations
 
-`fleet_observe` is an opt-in read-only projection of `inspect`. A nonsecret
+`fleet_observe` is a read-only projection of `inspect`. Its task-scoped
+`profile_action` supports status, set, on, off and health. New task IDs default
+OFF. OFF makes `view:auto` return the full observation; ON restores the last
+Low-Max level and makes automatic reads compact. The setting uses an atomic
+private file, a per-task lock and 32 rotating revision slots, so parallel
+sessions see changes without restart. It stores no observation payload.
+A nonsecret
 `query` filters active-application windows only. It preserves candidate counts,
 identity, ambiguity, focus, permissions, input switches, lease and report receipts.
 Field revision, page load and exact field readback stay explicitly unmeasured.

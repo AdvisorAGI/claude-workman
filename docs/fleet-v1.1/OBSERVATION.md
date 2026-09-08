@@ -5,7 +5,8 @@ below that it remained reserved was stale. The successor has no Air reservation;
 the adapter update is now installed. See AIR_ACCEPTANCE_CONTINUATION.md for the
 fresh checks and current owner-use question. No new input timing is claimed.
 
-Status: opt-in interface implemented, tested and installed. The owner targets
+Status: compact interface and durable task policy are implemented, tested and
+installed in plugin `1.1.0+codex.20260908022346`. The owner targets
 70-80% fewer total tokens while retaining full reasoning and accurate control.
 That target is not met or promised by these payload measurements. The model
 remains Astra xhigh with coding Fast off. Raw Caveman remains isolated test data,
@@ -13,7 +14,18 @@ not doctrine. No model calls were made by this implementation or benchmark.
 
 ## Interface version 1
 
-`fleet_observe(node, query=None, receipt_id=None, view="compact", observation_id=None)`
+`fleet_observe(node, query=None, receipt_id=None, view="auto",
+observation_id=None, task_id="workman-fleet-v1.1",
+profile_action="observe", level=None)`
+
+The task policy actions are `status`, `set`, `on`, `off` and `health`. A new
+task starts OFF. OFF returns the full observation for automatic reads. `set`
+chooses low, medium, high or max; ON restores the last selected enabled level.
+Low-Max compact views retain at most 50, 25, 10 or 5 candidate identities while
+preserving the full candidate count and the cached original. Explicit full or
+compact views remain available. The setting is private, atomic, shared across
+sessions and reloads on every call. Its history is bounded to 32 revision slots.
+It stores no raw observation, screen, title, text, coordinate or transcript.
 
 - A fresh call performs one existing `inspect`, including its ordinary recall,
   local recording and DGX delivery. It does not capture, click, type, focus an
@@ -53,10 +65,11 @@ remain necessary. A window token does not identify the focused field. A historic
 visual receipt does not prove present task completion. Callers should retain the
 ordinary Workman entry point when projection would hide needed context.
 
-Sources: `codex/workman-fleet/scripts/observation.py`, `server.py`,
-`tests/test_observation.py`. The Silent Mode experiment owns its separate pure
-inventory selector and Low-Max profiles; this interface adds no global profile
-or parallel memory/scheduler.
+Sources: `codex/workman-fleet/scripts/observation.py`,
+`observation_policy.py`, `server.py`, `tests/test_observation.py` and
+`tests/test_observation_policy.py`. The policy adapts the reviewed Low-Max
+presentation concept to real Workman observations. It adds no global doctrine,
+model change or scheduler.
 
 ## Measured results
 
@@ -96,6 +109,13 @@ Evidence: `evidence/observation-installed-check.json`,
 `observation-payload-benchmark-final.json`, `observation-live-readonly.json`,
 `observation-installed-before-x11-pointer-shape.json`.
 
+The persistent policy is separately verified across a new Python process. OFF,
+ON restoration, 40 revisions into 32 bounded slots, corrupt-state refusal,
+local health output and automatic full/compact switching pass. Large synthetic
+inventory evidence from the separate experiment showed 76.6019% total-token
+reduction at High for 2,000 rows, with exact recovery and OFF restoration. That
+is a stress-test result, not an everyday Workman or billing guarantee.
+
 ## Direct input optimization and remaining gates
 
 Mac direct move/click now omit an adapter-level pointer RPC used only to compute
@@ -104,19 +124,18 @@ settle, click and grant handling. Smooth mode keeps the duration calculation;
 permission, input switches, lease and focus rules were not relaxed. Regression
 tests verify the direct and smooth call paths and STOP behavior.
 
-The source change is included in the installed DGX plugin package. **It has not
-been deployed to the Mac adapter files during the coordinator's credential
-workflow.** No new Mac click timing or typing correctness is claimed. Deployment
-must use the existing verified-backup installer once that device is released,
-then recheck actual capture/input and measure matched trials.
+The source change is in the installed plugin and all four device adapters. The
+verified-backup installer ran only after Mini was released. Matching hashes and
+device-local compilation passed. No new Mac click timing or typing correctness
+is claimed.
 
-Air's read-only grant check at 00:40:18 UTC showed Screen Recording and
-Accessibility true; event `08995b00491b4187864b7fdc6546586b` recorded locally and
-received by DGX. The coordinator's reservation remains. No Air screenshot or
-input was taken during this addition. Machome's earlier privacy gates and all
-other pending acceptance items in RESULTS.md remain open.
+Air's live grant check at 02:11:40 UTC showed Screen Recording and Accessibility
+true; event `221c0074c7b44047b92d78ce8f0201f9` recorded locally and reached DGX.
+No Air screenshot or input was taken. The owner-use question remains because
+verification pages were open. Machome's privacy gates and all other pending
+acceptance items in RESULTS.md remain open.
 
-Final automated run: **456 passed in 2.03 seconds**, exit 0. The first new test
+Final automated run: **480 passed in 2.85 seconds**, exit 0. The first new test
 collection found a missing bracket; a later test edit misplaced three assertions
 and failed five cases. Both were corrected before installation; the failed logs
 are retained with the final passing log. Plugin validation, installation and

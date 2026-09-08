@@ -20,6 +20,10 @@ claude-workman 0.3.0 and the macOS helper 0.2.0.
   grants. An MCP handshake alone never counts as device control proof.
 - Fresh automated tests cover dispatch, node validation, coordinate contracts,
   focus checks, permission denial, failures, and text-free event reporting.
+- A persistent per-task observation switch supports OFF and Low-Max across
+  parallel sessions, uses atomic recovery and bounded setting history, and
+  never changes model or safety gates. Individual evidence journals rotate to
+  append-only 4 MiB segments without deleting history.
 - Each available device passes harmless capture, movement, click, text and
   window-focus tests, restoring prior focus and pointer. Human permission
   gates remain explicitly separate from completed code.
@@ -38,6 +42,8 @@ claude-workman 0.3.0 and the macOS helper 0.2.0.
   restores focus/pointer when allowed and releases ownership.
 - Exact evidence, remaining gates, a v1.1 checkpoint and rollback instructions
   are saved here. No push or publication is authorized.
+- Raw Caveman remains a byte-pinned, default-OFF Workman test provider only.
+  It never changes doctrine, normal sessions, hooks or model routing.
 
 ## Organization decision
 

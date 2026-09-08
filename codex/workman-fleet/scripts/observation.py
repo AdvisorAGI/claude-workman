@@ -91,7 +91,7 @@ def needs_original(raw):
     return any(v is not None and (not isinstance(v,dict) or set(v)-keys) for v,keys in checks)
 
 
-def project(item, observation_id):
+def project(item, observation_id, identity_limit=10):
     raw = item['raw']; data = mapping(raw.get('data')); status = mapping(data.get('status'))
     active = mapping(data.get('active')); perms = mapping(status.get('permissions'))
     windows = active.get('windows')
@@ -104,8 +104,8 @@ def project(item, observation_id):
     candidates = {'kind': 'window', 'scope': 'active_application_only',
                   'count': len(hits) if hits is not None else None,
                   'state': 'unavailable' if hits is None else 'none' if not hits else 'unique' if len(hits) == 1 else 'ambiguous',
-                  'identities': [{k: w[k] for k in ('id', 'pid') if k in w} for w in (hits or [])[:10]],
-                  'truncated': hits is not None and len(hits) > 10}
+                  'identities': [{k: w[k] for k in ('id', 'pid') if k in w} for w in (hits or [])[:identity_limit]],
+                  'truncated': hits is not None and len(hits) > identity_limit}
     compact = {'v': 1, 'observation_id': observation_id, 'device': item['node'],
         'observed_at': data.get('observed_at', mapping(raw.get('event')).get('ts')),
         'cache_age_ms': round((time.monotonic() - item['created']) * 1000),
@@ -127,9 +127,9 @@ def project(item, observation_id):
     return compact
 
 
-async def observe(node, query=None, receipt_id=None, view='compact', observation_id=None):
+async def observe(node, query=None, receipt_id=None, view='compact', observation_id=None, identity_limit=10):
     node = fleet.ALIASES.get(node, node)
-    if node not in learning.NODES or view not in ('compact', 'full'):
+    if node not in learning.NODES or view not in ('compact', 'full') or type(identity_limit) is not int or not 1 <= identity_limit <= 50:
         raise ValueError('unknown device or observation view')
     if query is not None and (not isinstance(query, str) or not 1 <= len(query) <= 200):
         raise ValueError('use a short nonsecret window query')
@@ -150,4 +150,4 @@ async def observe(node, query=None, receipt_id=None, view='compact', observation
                 'cache_age_ms': round((time.monotonic() - item['created']) * 1000),
                 'original': copy.deepcopy(item['raw']), 'receipt': receipt(node, item['receipt_id']),
                 'rule': 'Historical inspection, not current authorization; recheck live guards before input.'}
-    return project(item, observation_id)
+    return project(item, observation_id, identity_limit)

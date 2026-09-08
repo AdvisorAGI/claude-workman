@@ -26,6 +26,7 @@ CODES = ("ok", "permission_required", "daemon_unavailable", "focus_changed",
          "invalid_arguments", "backend_error", "blank_capture", "unsupported",
          "transport_error", "timeout", "recording_failed", "device_busy", "input_disabled")
 HEX = re.compile(r"^[a-f0-9]{32}$")
+MAX_JOURNAL_BYTES = 4 * 1024 * 1024
 
 
 def now():
@@ -53,9 +54,17 @@ def clean_event(event):
         raise ValueError("invalid timestamp")
     e = {k: event[k] for k in ("id", "node", "action", "code", "ts")}
     e["ok"] = event.get("ok") is True
-    for k in ("duration_ms", "typed_chars"):
+    for k in ("duration_ms", "typed_chars", "motion_duration_ms"):
         if k in event and type(event[k]) is int and 0 <= event[k] <= 1000000:
             e[k] = event[k]
+    if event.get("motion") in ("direct", "human"):
+        e["motion"] = event["motion"]
+    if type(event.get("speed_milli")) is int and 250 <= event["speed_milli"] <= 4000:
+        e["speed_milli"] = event["speed_milli"]
+    if type(event.get("motion_steps")) is int and 0 <= event["motion_steps"] <= 10000:
+        e["motion_steps"] = event["motion_steps"]
+    if type(event.get("humanized")) is bool:
+        e["humanized"] = event["humanized"]
     for k in ("evidence_id", "verifies", "corrects"):
         if HEX.fullmatch(str(event.get(k, ""))):
             e[k] = event[k]
@@ -74,32 +83,69 @@ def clean_event(event):
     return e
 
 
+def segment_directory(path):
+    return path.parent / ("." + path.name + ".segments")
+
+
+def journal_files(path):
+    segments = segment_directory(path)
+    files = sorted(segments.glob("*.jsonl")) if segments.exists() else []
+    if path.exists():
+        files.append(path)
+    return files
+
+
+def journal_storage(path):
+    files = journal_files(path)
+    sizes = [p.stat().st_size for p in files]
+    return {"files": len(files), "total_bytes": sum(sizes), "largest_file_bytes": max(sizes, default=0),
+            "segment_limit_bytes": MAX_JOURNAL_BYTES, "append_only_segments": True}
+
+
 def read_events(path):
     """Read only our schema marker, never return historical unfiltered payloads."""
-    if not path.exists():
+    files = journal_files(path)
+    if not files:
         return []
     rows = []
-    with path.open() as f:
-        for line in f:
-            try:
-                r = json.loads(line)
-                if r.get("tool") == "workman_fleet_v1.1":
-                    rows.append(clean_event(r["payload"]))
-            except (ValueError, KeyError, TypeError):
-                continue
+    for source in files:
+        with source.open() as f:
+            for line in f:
+                try:
+                    r = json.loads(line)
+                    if r.get("tool") == "workman_fleet_v1.1":
+                        rows.append(clean_event(r["payload"]))
+                except (ValueError, KeyError, TypeError):
+                    continue
     return rows
+
+
+def rotate_journal(path, last_event_id):
+    if not path.exists() or path.stat().st_size <= MAX_JOURNAL_BYTES:
+        return None
+    directory = segment_directory(path)
+    directory.mkdir(parents=True, exist_ok=True, mode=0o700)
+    directory.chmod(0o700)
+    index = len(list(directory.glob("*.jsonl"))) + 1
+    destination = directory / f"{index:08d}-{last_event_id}.jsonl"
+    if destination.exists():
+        raise ValueError("journal segment identity collision")
+    os.replace(path, destination)
+    os.chmod(destination, 0o600)
+    return destination
 
 
 def append(path, events):
     """Idempotent event delivery; the old journal shape stays readable by learner."""
     events = [clean_event(e) for e in events]
     with lock(path.with_suffix(".fleet.lock")):
-        known = {e["id"]: e for e in read_events(path)}
+        existing = read_events(path)
+        known = {e["id"]: e for e in existing}
+        seen = set(known)
         for e in events:
             if e["id"] in known and known[e["id"]] != e:
                 raise ValueError("conflicting event identity")
             known[e["id"]] = e
-        seen = {e["id"] for e in read_events(path)}
         with path.open("a") as f:
             os.chmod(path, 0o600)
             for e in events:
@@ -109,6 +155,8 @@ def append(path, events):
                     seen.add(e["id"])
             f.flush()
             os.fsync(f.fileno())
+        if events:
+            rotate_journal(path, events[-1]["id"])
         if path == journal_path():
             publish_status(read_events(path))
 
@@ -191,6 +239,9 @@ def lessons(events):
             found[(e["node"], "verified_" + action)] = {
                 "node": e["node"], "kind": "verified_" + action, "lesson": text,
                 "evidence_ids": ids, "last_seen": e["ts"]}
+            if action in ("move", "click") and target.get("motion"):
+                motion = {k: target[k] for k in ("motion", "speed_milli", "humanized", "motion_steps", "motion_duration_ms") if k in target}
+                found[(e["node"], "verified_" + action)]["motion_profile"] = motion
     return list(found.values())
 
 

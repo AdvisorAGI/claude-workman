@@ -13,6 +13,10 @@ The upstream license explicitly identifies skills as MIT. Provenance, license
 and package metadata are stored beside it. No installer, hook, proxy, engine,
 telemetry, transcript collector or model-API client was installed.
 
+Fresh `git ls-remote` at 02:03 UTC on September 8 returned the same HEAD. The
+reviewed pin and local skill digest still match exactly, so the packaged test
+provider needed no source update.
+
 Sources:
 - https://github.com/JuliusBrussee/caveman/commit/15581d14007fd01fb3f132016741962f34936ca2
 - https://github.com/JuliusBrussee/caveman/blob/15581d14007fd01fb3f132016741962f34936ca2/skills/caveman/SKILL.md

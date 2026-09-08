@@ -9,6 +9,15 @@ def test_speed_scales_duration_without_changing_target():
     assert motion_profile.duration_ms((0, 0), (400, 300), 2) == pytest.approx(motion_profile.duration_ms((0, 0), (400, 300), 1) / 2, abs=1)
 
 
+def test_documented_presets_are_small_copies_and_keep_direct_default():
+    assert motion_profile.preset("responsive") == {"motion": "human", "speed": 1.5}
+    selected = motion_profile.preset("responsive"); selected["speed"] = 4
+    assert motion_profile.preset("responsive")["speed"] == 1.5
+    assert motion_profile.preset("direct")["motion"] == "direct"
+    with pytest.raises(ValueError):
+        motion_profile.preset("undetectable")
+
+
 def test_linux_smooth_move_removes_endpoint_jitter(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKMAN_LEARN_ROOT", str(tmp_path))
     posted = []

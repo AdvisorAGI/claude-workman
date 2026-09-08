@@ -1,22 +1,32 @@
 # Workman fleet v1.1 verification
 
-Current Air coordination, 2026-09-08: the old coordinator released its lease at
-00:23:46 UTC. The successor confirms no Air reservation. Fresh checks found both
-grants enabled, and the source adapter update is now installed on Air. Live input
-is awaiting clarification of owner use because verification pages were open;
-no input was performed and the short inspection lease was released. See
-[AIR_ACCEPTANCE_CONTINUATION.md](AIR_ACCEPTANCE_CONTINUATION.md). Earlier reservation
-and source-only Air statements below are historical and superseded by this note.
-Latest tested installation: **1.1.0+codex.20260908012019**, eight tools,
-**464 automated tests passed**. Existing features and earlier commits are retained.
+Latest tested installation: **1.1.0+codex.20260908022346**, eight tools,
+**480 automated tests passed**. The unchanged Chrome companion passes 38 of 38.
+The adapter, learner and motion files are installed with matching hashes on all
+four devices, with verified backups from 02:11-02:13 UTC. The Mini coordinator
+released its UI before that source update. No Mac UI action occurred.
 
-Latest addition, 2026-09-08 00:51 UTC: opt-in `fleet_observe` is installed as the
-eighth tool; **456 tests pass**. A live read-only DGX capsule was 11.597% smaller
-than the equivalent full response with the same receipt. This is not a total-token
-claim. Mac direct-input optimization is tested in source but not deployed to the
-reserved Macs. See [OBSERVATION.md](OBSERVATION.md). The initial checkpoint and
-the earlier verification below remain preserved; their 432-test/seven-tool
-figures describe that checkpoint, not the latest installed package.
+The task-scoped observation policy survives server restarts, shares state across
+parallel sessions, supports OFF and Low-Max, uses atomic writes and 32 bounded
+revision slots, and stores no raw observation. A live installed OFF/ON check
+returned 2,487 bytes in full automatic mode and 2,200 bytes at High, 11.54%
+less for that matched DGX shape. It is left ON at High for this Workman task.
+This is response-byte evidence, not a total-token claim.
+
+Motion requests and backend-supplied motion outcomes now enter the sanitized
+journal and DGX graph without coordinates. The live adapters are installed,
+but a new real move/click-to-graph test is pending owner-clear Air UI. Raw
+Caveman remains an isolated default-OFF Workman test provider. Fresh GitHub HEAD
+and the reviewed local pin match exactly. See [OBSERVATION.md](OBSERVATION.md),
+[CAVEMAN_TEST.md](CAVEMAN_TEST.md), and
+[AIR_ACCEPTANCE_CONTINUATION.md](AIR_ACCEPTANCE_CONTINUATION.md).
+
+At 02:29:59 UTC the installed consolidated onboarding flow opened machome's
+supported Screen & System Audio Recording pane. Event
+`ff36145956d74e91a0ea1427d145f484` recorded and reached DGX. Capture remains
+unauthorized, so no screenshot/callout was attempted. The owner must enable
+Workman there, then enable Workman under Accessibility; the flow will recheck
+and continue after the first grant.
 
 Updated 2026-09-08 UTC. The implementation is packaged and installed locally.
 Fleet acceptance is still partial: machome needs human privacy grants, the Air
@@ -26,7 +36,7 @@ or published. Fleet v1.1 is separate from upstream package versions.
 
 ## Device readiness and actual proof
 
-Live status was rechecked at 00:21:00-01 UTC. Permissions are observations at
+Live status was rechecked at 02:11:40 UTC, and Mini at 02:13:54 UTC. Permissions are observations at
 that time, not lasting authorization. All four devices recorded the status
 locally and delivered it to the existing DGX hub. A second collection returned
 zero new events on all four devices, confirming no duplicate delivery.
@@ -34,8 +44,8 @@ zero new events on all four devices, confirming no duplicate delivery.
 | Device | Fresh grants/helper | Actual screen/input evidence | Current gate |
 |---|---|---|---|
 | DGX | X11 ready | Capture, click, exact typing, focus, minimize, title-bar drag, local STOP | Desktop released; preserve owner's split view |
-| Mac mini | Screen Recording and Accessibility true | Capture, click, exact replacement and multiline typing/paste, focus restoration, STOP | Released; no further UI actions under Air-only routing |
-| MacBook Air | Screen Recording and Accessibility true | Capture, click and exact 26-character input; 13 completed workflow trials | Released for coordinator's credential workflow; do not take over |
+| Mac mini | Screen Recording and Accessibility true | Capture, click, exact replacement and multiline typing/paste, focus restoration, STOP | Coordinator released; adapter updated without UI action |
+| MacBook Air | Screen Recording and Accessibility true | Capture, click and exact 26-character input; 13 completed workflow trials | No agent lease; wait for owner to clear the open verification pages before input |
 | machome | App/helper reachable; both grants false | Local recording and DGX receipt only | Human grants required; no capture/input proof |
 
 On machome, the owner must enable **Workman** in System Settings > Privacy &
@@ -54,10 +64,10 @@ references, not pixels or typed content.
 ## Installed package and controls
 
 Maintained source: `/home/monzurul/workman/codex/workman-fleet`.
-Installed version: `1.1.0+codex.20260908001438`, in the personal Codex marketplace.
-The installed stdio process exposed and exercised the seven tools:
-`fleet_control`, `fleet_onboard`, `fleet_recall`, `fleet_report`, `fleet_memory`,
-`fleet_verify`, `fleet_test_mode`. The installed process also refused an unknown
+Installed version: `1.1.0+codex.20260908022346`, in the personal Codex marketplace.
+The installed stdio process exposed and exercised the eight tools:
+`fleet_observe`, `fleet_control`, `fleet_onboard`, `fleet_recall`, `fleet_report`,
+`fleet_memory`, `fleet_verify`, `fleet_test_mode`. The installed process also refused an unknown
 device. This is an actual tool-call check, not a handshake count alone.
 
 One explicit-device entry point reuses the inspected runtime paths and existing
@@ -79,6 +89,11 @@ open the local control panel. They do not start a monitoring service. Task finis
 restored DGX/mini/preflight Air focus and pointer. The later Air interruption
 released ownership without restoring over the changed focus.
 
+Every device now has the same adapter SHA-256 `11782b...d75ad2`, learner
+`29c2a2...6eae4a`, and motion profile `99f696...244ff`. Each installed file
+compiled with that device's existing Python. No helper, runtime, relay, browser,
+privacy database or service was restarted.
+
 ## Learning and graph memory
 
 The existing Workman journal, fleet reporter and DGX learning hub are reused.
@@ -88,6 +103,14 @@ and verified lessons with stable IDs and source/evidence references. No raw
 typed text, key chords, window titles, secrets, screens or transcripts enter
 this path. Recall happens before ordinary fleet actions; urgent STOP bypasses
 recall/report collection and explicitly reports delivery as pending.
+
+Individual journals now rotate after 4 MiB into private append-only segments.
+History is retained and read as one evidence family. Tests force multiple
+rotations, verify exact event order and deduplication, and confirm no rows are
+lost. Current largest hub journal is Mini at 178,662 bytes, below the threshold.
+Motion event fields are limited to direct/human, speed 0.25-4 encoded as an
+integer, backend humanized flag, step count and duration. Coordinates and
+backend result text remain outside the positive schema.
 
 Independent later queries retrieved four verified DGX lessons, five mini
 lessons and three Air lessons. Machome has permission-failure evidence and
@@ -118,6 +141,16 @@ existing file-memory convention.
 
 These are small local-fixture measurements, not general performance guarantees.
 No human baseline has been measured. No model token or cost comparison has run.
+
+Air's fresh offline planner check ran only after both grants were rechecked.
+Across 1,000 generated paths per mode, direct and human planning each ended
+within 0 logical points in 100% of cases. Human planning used a median 56 points,
+1.047 path-length ratio, 0.488 seconds planned movement and 0.022833 ms planner
+time per path. The process peak RSS was 54,771,712 bytes. No screen or input
+action occurred. A person-run baseline and detection result remain missing.
+The Workman duration formula gives median planned times of 681 ms at careful
+0.7, 477 ms at smooth 1.0 and 318 ms at responsive 1.5 over 1,000 generated
+distances. These are formulas and planner results, not live click timing.
 
 | Measurement | Fresh result | Limit |
 |---|---|---|
@@ -199,16 +232,28 @@ See [CAVEMAN_TEST.md](CAVEMAN_TEST.md) and `evidence/caveman-installed-check.jso
 
 ## Automated checks and recovery
 
-- Desktop plus fleet pytest: **432 passed in 2.05 seconds**, exit 0.
+- The first focused motion/journal run reported **90 passed, 10 failed** because
+  the new append path marked incoming IDs as already written. The reader and
+  writer test exposed it; the seen-set order was corrected, then the same focused
+  selection passed **100 of 100**.
+- A bare repository-root `pytest` exited 2 during collection because preserved
+  checkpoint-recovery test copies duplicate two module names. Those recovery
+  files were not deleted. Running the intended `tests` and plugin test roots
+  produced the final result below.
+- Desktop plus fleet pytest: **480 passed in 2.85 seconds**, exit 0.
 - Browser companion: **38 passed, 0 failed**, unchanged companion, exit 0.
 - Mini helper selection: **209 tests, 16 skipped**, exit 0.
 - Air helper selection: **59 tests**, exit 0.
 - Taskboard final source compile: exit 0. Valid and retracted proof cases each
   passed four model checks and one evidence check, without changing task files.
-- Codex plugin validator and supported local installation: exit 0.
+- Codex plugin validator and supported local installation: exit 0, version
+  `1.1.0+codex.20260908022346`.
 - Installed MCP calls/resource pin/default-OFF/isolation/OFF checks: exit 0.
 - All ten helper/reporter recovery backups and current hashes verified; all six
   original v1.0 checkpoint hashes still match.
+- One checkpoint `sha256sum -c` invocation ran from the repository directory and
+  exited 1 because its file names are relative. Rerunning from the checkpoint
+  directory verified all nine entries.
 
 Existing dirty changes, runtimes, source folders, browser companion and working
 caches were preserved. No virtual environment was moved. See [INVENTORY.md](INVENTORY.md)

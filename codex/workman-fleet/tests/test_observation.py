@@ -95,6 +95,15 @@ def test_candidate_limit_retains_full_ambiguity_and_original(monkeypatch):
     assert len(r['candidates']['identities']) == 10 and r['candidates']['state'] == 'ambiguous'
 
 
+def test_profile_candidate_limit_changes_presentation_only(monkeypatch):
+    original = raw(); original['data']['active']['windows'] *= 10
+    monkeypatch.setattr(fleet, 'control', AsyncMock(return_value=original))
+    r = asyncio.run(observation.observe('air', identity_limit=5))
+    assert r['candidates']['count'] == 20 and len(r['candidates']['identities']) == 5
+    full = asyncio.run(observation.observe('air', view='full', observation_id=r['observation_id']))
+    assert full['original'] == original
+
+
 def test_cache_expiry_device_boundary_and_bounded_eviction(monkeypatch):
     key = observation.put(raw(), 'air', None, None)
     with pytest.raises(ValueError): asyncio.run(observation.observe('mini', observation_id=key))

@@ -1,6 +1,6 @@
 {
   "name": "workman-fleet",
-  "version": "1.1.0+codex.20260908012019",
+  "version": "1.1.0+codex.20260908022346",
   "description": "Workman fleet control and evidence-backed learning across DGX, mini, Air and machome.",
   "author": {
     "name": "Local Workman fleet"

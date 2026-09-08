@@ -102,7 +102,11 @@ The prior clipboard is replaced without being read or copied. Atomic paste can
 finish after STOP. This preset does not change the coding model's Fast setting.
 
 Move/click support per-call motion direct|human and speed 0.25–4; default direct.
-Smooth movement is optional ergonomics, with no anti-bot evasion claim.
+Documented presets are direct 1.0, careful human 0.7, smooth human 1.0 and
+responsive human 1.5. Presets are documentation for the existing arguments,
+not a second input path. Smooth movement is optional ergonomics, with no
+anti-bot evasion claim. Motion, bounded speed and available backend step/timing
+outcomes enter the sanitized journal and graph; coordinates never do.
 STOP returns promptly with reporting pending; run fleet_report or the next fleet
 call to collect its recorded event. Record reviewed lessons through `lesson`
 only when the named verification supports them. `correct` retracts a mistaken
@@ -123,6 +127,12 @@ Do not claim model/token/cost savings from the successful interface checks.
 ## Compact observation option
 
 `fleet_observe(node, query?, receipt_id?)` projects an actual read-only inspection.
+Use a stable nonsecret `task_id`. `profile_action:status|set|on|off|health`
+manages its durable presentation setting across parallel sessions. New tasks
+start OFF; OFF returns full data for `view:auto`. Set Low-Max or turn ON to use
+compact automatic views. This switch never changes a model, input guard or
+evidence rule. Health checks local durable state only and performs no remote
+probe. The bounded revision ring stores settings, never raw observations.
 The query matches WINDOW titles within the active application only. Counts and
 ambiguity are retained; it does not prove an element match or scan all apps.
 It retains live permission/OFF/lease/focus and reporting state. Null field

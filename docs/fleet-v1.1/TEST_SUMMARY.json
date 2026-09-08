@@ -5,8 +5,8 @@
   "checked_date": "2026-09-08",
   "automated": {
     "pytest": {
-      "passed": 432,
-      "seconds": 2.05,
+      "passed": 480,
+      "seconds": 2.85,
       "exit": 0
     },
     "browser_companion": {
@@ -26,32 +26,35 @@
   },
   "devices": {
     "dgx": {
-      "checked_at": "2026-09-08T00:21:00Z",
+      "checked_at": "2026-09-08T02:11:40Z",
       "helper_ok": true,
       "ready": true,
       "local_recorded": true,
       "dgx_received": true
     },
     "mini": {
-      "checked_at": "2026-09-08T00:21:01Z",
+      "checked_at": "2026-09-08T02:13:54Z",
       "helper_ok": true,
       "ready": true,
       "local_recorded": true,
       "dgx_received": true
     },
     "air": {
-      "checked_at": "2026-09-08T00:21:01Z",
+      "checked_at": "2026-09-08T02:11:40Z",
       "helper_ok": true,
       "ready": true,
       "local_recorded": true,
       "dgx_received": true
     },
     "machome": {
-      "checked_at": "2026-09-08T00:21:01Z",
+      "checked_at": "2026-09-08T02:29:59Z",
       "helper_ok": true,
       "ready": false,
       "local_recorded": true,
-      "dgx_received": true
+      "dgx_received": true,
+      "onboarding_state": "awaiting_human",
+      "settings_opened": "screen_recording",
+      "evidence_id": "ff36145956d74e91a0ea1427d145f484"
     }
   },
   "air_workflows": {
@@ -71,6 +74,38 @@
     "cpu_seconds": 0.0,
     "rss_before": 57102336,
     "rss_after": 57102336
+  },
+  "installed_plugin": {
+    "version": "1.1.0+codex.20260908022346",
+    "path": "/home/monzurul/.codex/plugins/cache/personal/workman-fleet/1.1.0+codex.20260908022346",
+    "tools": 8,
+    "validation_exit": 0,
+    "installed_stdio_verified": true
+  },
+  "observation_policy": {
+    "task_id": "workman-fleet-v1.1",
+    "final_level": "high",
+    "revision": 3,
+    "independent_process_recall": true,
+    "off_returns_full": true,
+    "on_restores_high": true,
+    "off_auto_bytes": 2487,
+    "high_auto_bytes": 2200,
+    "presentation_byte_reduction_percent": 11.540008041817451,
+    "history_slots": 32,
+    "raw_observations_persisted": false
+  },
+  "motion": {
+    "adapter_hash_all_devices": "11782b3cdf8be198bea2afe81134dd50c9981d369cf5b7090b23f66996d75ad2",
+    "learning_hash_all_devices": "29c2a20529c79c12c55dbbd8b4d59c918fb3b20a86b8fc85d33b6ebebd6eae4a",
+    "motion_profile_hash_all_devices": "99f696178da459be7d4b3d94f59afd0df77d0ffcd5663e6a8cee262bb40244ff",
+    "air_planner_paths_per_mode": 1000,
+    "air_planner_endpoint_score_percent": 100.0,
+    "air_human_points_p50": 56.0,
+    "air_human_planned_seconds_p50": 0.4883935338207939,
+    "live_post_update_input": false,
+    "human_baseline": null,
+    "detection_claim": null
   },
   "caveman_test_interface": {
     "checked_at": "2026-09-08T00:19:43.911449+00:00",
@@ -116,7 +151,7 @@
     "mac-workman-helper-source.tar.gz": true
   },
   "limitations": [
-    "Air reserved for coordinator credentials; incomplete workflow/STOP/load benchmark",
+    "Air owner-use question remains; incomplete workflow/STOP/load and live motion-event benchmark",
     "machome Screen Recording and Accessibility missing",
     "final taskboard candidate compiled but not deployed",
     "no human baseline",

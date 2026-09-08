@@ -10,20 +10,51 @@ import onboarding
 mcp = FastMCP("Workman Fleet v1.1")
 
 
-@mcp.tool(annotations=ToolAnnotations(readOnlyHint=True, openWorldHint=False))
+@mcp.tool(annotations=ToolAnnotations(readOnlyHint=False, destructiveHint=False, openWorldHint=False))
 async def fleet_observe(node: str, query: str | None = None, receipt_id: str | None = None,
-                        view: str = "compact", observation_id: str | None = None) -> CallToolResult:
+                        view: str = "auto", observation_id: str | None = None,
+                        task_id: str = "workman-fleet-v1.1", profile_action: str = "observe",
+                        level: str | None = None) -> CallToolResult:
     """Opt-in compact inspection, no capture or input. Query filters active-app windows
     only; count/identity/ambiguity are not element or global-window proof. Keeps
     permission, STOP switches, lease/focus, reporting and validated action/visual
     receipts. Null field_revision, load_state and exact_readback are unmeasured.
     Always retain independent global visual checks and exact readback when needed.
-    view=full with the returned observation_id recalls the original for 30 seconds,
+    Per-task profile_action status|set|on|off|health is durable across process
+    restarts and parallel sessions. set requires level off|low|medium|high|max.
+    Automatic view is full while OFF and compact while ON. Explicit compact/full
+    remains available. Profiles change presentation only. view=full with the
+    returned observation_id recalls the original for 30 seconds,
     in this process only, with no new remote call. No persistent raw observation
     cache or style/model change. Unknown states never authorize input.
     """
     import observation
-    result = await observation.observe(node, query, receipt_id, view, observation_id)
+    import observation_policy
+    policy = observation_policy.TaskPolicy(task_id)
+    if profile_action not in ("observe", "status", "set", "on", "off", "health"):
+        raise ValueError("unknown observation profile action")
+    if profile_action != "observe":
+        if any(v is not None for v in (query, receipt_id, observation_id)) or view != "auto":
+            raise ValueError("profile operations do not inspect a device")
+        if profile_action == "status":
+            if level is not None: raise ValueError("status does not change level")
+            result = {"policy": policy.status()}
+        elif profile_action == "health":
+            if level is not None: raise ValueError("health does not change level")
+            result = policy.health()
+        elif profile_action == "set":
+            if level not in observation_policy.LEVELS: raise ValueError("set requires a valid level")
+            result = {"policy": policy.set(level)}
+        else:
+            if level is not None: raise ValueError("use set to choose a level")
+            result = {"policy": policy.set(profile_action)}
+    else:
+        if level is not None: raise ValueError("use profile_action=set to choose a level")
+        state = policy.status()
+        resolved_view = ("full" if state["level"] == "off" else "compact") if view == "auto" else view
+        result = await observation.observe(node, query, receipt_id, resolved_view, observation_id,
+                                           state["profile"]["identity_limit"] or 10)
+        result["observation_policy"] = state
     # One JSON text representation, matching fleet_control. Avoid duplicating
     # the same observation in automatic structuredContent and text payloads.
     return CallToolResult(content=[TextContent(type="text", text=json.dumps(result, separators=(",", ":")))])

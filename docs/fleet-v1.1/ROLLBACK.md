@@ -13,6 +13,20 @@ entry whose current hash still matches; otherwise inspect newer work first.
 Use existing authenticated SSH and copy the selected backup to a temporary file
 beside its destination, preserve mode, then atomically replace and re-hash it.
 
+The final device adapter backups are:
+
+- DGX: `/home/monzurul/.claude/tools/workman-fleet-v1.1/backups/20260908T022331Z/device.py`
+- Mini: `/Users/tariqul/.claude/tools/workman-fleet-v1.1/backups/20260908T022331Z/device.py`
+- Air: `/Users/muhammadtariqul/.claude/tools/workman-fleet-v1.1/backups/20260908T022332Z/device.py`
+- machome: `/Users/amg/.claude/tools/workman-fleet-v1.1/backups/20260908T022332Z/device.py`
+
+The preceding deployment directories at 02:11-02:13 UTC contain the learner and
+motion-profile backups listed in the device installation evidence. Current
+common SHA-256 values are `11782b...d75ad2` for `device.py`,
+`29c2a2...6eae4a` for `learning.py`, and `99f696...244ff` for
+`motion_profile.py`. Check the full current hash before restoring its matching
+backup. All three modules load per fleet request and need no helper restart.
+
 For helper changes, restart only the existing `ai.atmosphere.workman` LaunchAgent
 in the relevant logged-in user's GUI session after that device is released.
 Recheck live grants and capture/input. Never modify TCC. The prior runtime stays
@@ -46,6 +60,12 @@ skill symlink were retained. The maintained package in
 `/home/monzurul/workman/codex/workman-fleet` and personal marketplace link can
 reinstall the plugin using the supported Codex installer; no venv moves are
 needed. This installation does not add a daemon or public listening port.
+
+To disable compact automatic observations without removing anything, call
+`fleet_observe` with `task_id:"workman-fleet-v1.1"` and
+`profile_action:"off"`. The full automatic view returns immediately. Keep the
+private setting history and journal segments; they contain no raw screen or
+typed content and are part of recovery evidence.
 
 To undo the four scoped desktop-source edits, reverse only the reviewed v1.1
 patches in `workman/x11.py`, `workman/gtkops.py` and their two test files after

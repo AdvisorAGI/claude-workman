@@ -123,6 +123,34 @@ def test_event_whitelist_drops_every_unstructured_value():
     assert "SECRET" not in json.dumps(e) and e["typed_chars"] == 6
 
 
+def test_motion_outcome_is_sanitized_for_journal_and_graph():
+    class Fake:
+        def __init__(self, kind): pass
+        def execute(self, action, args):
+            return {"humanized": True, "steps": 31, "duration_s": 0.42,
+                    "title": "PRIVATE-SENTINEL", "at": [args["x"], args["y"]]}
+    result = device.run({"node": "dgx", "backend": "x11", "action": "move",
+                         "args": {"x": 10, "y": 20, "motion": "human", "speed": 1.5}}, Fake)
+    recorded = result["event"]
+    assert {k: recorded[k] for k in ("motion", "speed_milli", "humanized", "motion_steps", "motion_duration_ms")} == {
+        "motion": "human", "speed_milli": 1500, "humanized": True,
+        "motion_steps": 31, "motion_duration_ms": 420}
+    assert "PRIVATE-SENTINEL" not in learning.journal_path().read_text()
+    learning.receive("dgx", [recorded])
+    import memory_graph
+    attrs = memory_graph.query("dgx", "action_outcome")["entities"][0]["attrs"]
+    assert attrs["motion_steps"] == 31 and "PRIVATE-SENTINEL" not in json.dumps(attrs)
+
+
+def test_motion_fields_are_bounded_and_bad_values_are_dropped():
+    row = learning.clean_event(event(motion="human", speed_milli=1500, humanized=True,
+                                     motion_steps=25, motion_duration_ms=500))
+    assert row["motion"] == "human" and row["speed_milli"] == 1500 and row["humanized"] is True
+    bad = learning.clean_event(event(motion="stealth", speed_milli=99999, humanized="yes",
+                                     motion_steps=-1, motion_duration_ms=-1))
+    assert not set(bad) & {"motion", "speed_milli", "humanized", "motion_steps", "motion_duration_ms"}
+
+
 def test_existing_unrelated_journal_rows_never_export():
     p = learning.journal_path()
     p.parent.mkdir()
@@ -130,6 +158,17 @@ def test_existing_unrelated_journal_rows_never_export():
     learning.append(p, [event()])
     assert learning.read_events(p) == [event()]
     assert "PRIVATE" in p.read_text()  # Historical data is preserved, not copied.
+
+
+def test_large_journal_rotates_to_append_only_segments_without_losing_events(monkeypatch):
+    monkeypatch.setattr(learning, "MAX_JOURNAL_BYTES", 1)
+    path = learning.journal_path()
+    learning.append(path, [event("a")])
+    learning.append(path, [event("b")])
+    assert [row["id"] for row in learning.read_events(path)] == ["a" * 32, "b" * 32]
+    storage = learning.journal_storage(path)
+    assert storage["files"] == 2 and storage["append_only_segments"] is True
+    assert len(list(learning.segment_directory(path).glob("*.jsonl"))) == 2
 
 
 def test_receipt_idempotence_and_node_identity():
@@ -175,6 +214,18 @@ def test_verification_requires_later_same_device_capture(old_shot, wrong_node):
 def test_backend_success_without_visual_proof_is_not_a_success_lesson():
     learning.receive("dgx", [event()])
     assert fleet.recall() == []
+
+
+def test_verified_motion_lesson_retains_only_bounded_profile_evidence():
+    action = event("a", action="move", motion="human", speed_milli=1500,
+                   humanized=True, motion_steps=24, motion_duration_ms=390)
+    shot = event("b", action="shot", capture_sha256="d" * 64)
+    proof = event("c", action="verify", verifies=action["id"], evidence_id=shot["id"], verified=True)
+    learning.receive("dgx", [action, shot, proof])
+    lesson = next(item for item in fleet.recall("dgx") if item["kind"] == "verified_move")
+    assert lesson["motion_profile"] == {"motion": "human", "speed_milli": 1500,
+                                         "humanized": True, "motion_steps": 24,
+                                         "motion_duration_ms": 390}
 
 
 def test_retract_mistaken_verification_preserves_correction_evidence():

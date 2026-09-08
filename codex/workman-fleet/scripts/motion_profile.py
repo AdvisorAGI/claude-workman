@@ -5,6 +5,20 @@ import time
 import input_switch
 
 
+PRESETS = {
+    "careful": {"motion": "human", "speed": 0.7},
+    "smooth": {"motion": "human", "speed": 1.0},
+    "responsive": {"motion": "human", "speed": 1.5},
+    "direct": {"motion": "direct", "speed": 1.0},
+}
+
+
+def preset(name):
+    if name not in PRESETS:
+        raise ValueError("unknown motion preset")
+    return dict(PRESETS[name])
+
+
 def duration_ms(start, end, speed):
     distance = math.dist(start, end)
     seconds = max(.12, min(1.6, .10 + .075 * math.log2(distance / 24 + 1)))
