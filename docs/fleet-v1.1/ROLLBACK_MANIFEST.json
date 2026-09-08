@@ -1,0 +1,82 @@
+[
+  {
+    "node": "mini",
+    "path": "/Users/tariqul/src/claude-atmos-workman/computer-mcp/atmos_computer/daemon.py",
+    "backup": "/Users/tariqul/.claude/tools/workman-fleet-v1.1/backups/20260907T223831Z/daemon.py",
+    "previous_sha256": "4bb84d8b93bcf7c6d72a251d0ad26873e0dcddeffa68b08a82c378828b3db8b2",
+    "sha256": "287a527d074e6324cc19ec81c6c6cc70cf5fb8cdf81ccc41e22f9914ccf0d414",
+    "expected_current_sha256": "287a527d074e6324cc19ec81c6c6cc70cf5fb8cdf81ccc41e22f9914ccf0d414"
+  },
+  {
+    "node": "mini",
+    "path": "/Users/tariqul/src/claude-atmos-workman/computer-mcp/atmos_computer/ops.py",
+    "backup": "/Users/tariqul/.claude/tools/workman-fleet-v1.1/backups/20260907T224245Z/ops.py",
+    "previous_sha256": "6770d852cb5f2b1dc06b27c8b615fc9a571a8ce469bf891adbd45b1d8301a102",
+    "sha256": "acc9b3326ac8093787ad3cae18ad103be7e99b5861d05c9ccd808540735f8028",
+    "expected_current_sha256": "076e4a4d7efc5c92c9c66ed02a1466e466c43cfa5caec47834bf28b9461882ca"
+  },
+  {
+    "node": "air",
+    "path": "/Users/muhammadtariqul/.claude/plugins/cache/atmosphere-ai/workman/0.3.0/computer-mcp/atmos_computer/daemon.py",
+    "backup": "/Users/muhammadtariqul/.claude/tools/workman-fleet-v1.1/backups/20260907T225553Z/daemon.py",
+    "previous_sha256": "7fcb3613d8d41692e8a9bdae8ba2dca64c458ec8414e4770a066737361cd2c64",
+    "sha256": "6fe7f0bbb72bd6a3cd5b9d90aae995af4d2d0f7cbbe36dfb866049c66d058fc7",
+    "expected_current_sha256": "6fe7f0bbb72bd6a3cd5b9d90aae995af4d2d0f7cbbe36dfb866049c66d058fc7"
+  },
+  {
+    "node": "air",
+    "path": "/Users/muhammadtariqul/.claude/plugins/cache/atmosphere-ai/workman/0.3.0/computer-mcp/atmos_computer/ops.py",
+    "backup": "/Users/muhammadtariqul/.claude/tools/workman-fleet-v1.1/backups/20260907T225553Z/ops.py",
+    "previous_sha256": "b27268bef69656928db4b360a835766bc765f31af66cee1a683b833311e78f1a",
+    "sha256": "08db5f65b40e29c7595de2f25b2559e40d9d7501130f879a1a8a61adafdbd873",
+    "expected_current_sha256": "ec53e046e9881ff9cf3bb6f55db57f9c9fdbea967345469829e6d7d9a8069b71"
+  },
+  {
+    "node": "machome",
+    "path": "/Users/amg/src/claude-atmos-workman/computer-mcp/atmos_computer/daemon.py",
+    "backup": "/Users/amg/.claude/tools/workman-fleet-v1.1/backups/20260907T225554Z/daemon.py",
+    "previous_sha256": "7fcb3613d8d41692e8a9bdae8ba2dca64c458ec8414e4770a066737361cd2c64",
+    "sha256": "6fe7f0bbb72bd6a3cd5b9d90aae995af4d2d0f7cbbe36dfb866049c66d058fc7",
+    "expected_current_sha256": "6fe7f0bbb72bd6a3cd5b9d90aae995af4d2d0f7cbbe36dfb866049c66d058fc7"
+  },
+  {
+    "node": "machome",
+    "path": "/Users/amg/src/claude-atmos-workman/computer-mcp/atmos_computer/ops.py",
+    "backup": "/Users/amg/.claude/tools/workman-fleet-v1.1/backups/20260907T225554Z/ops.py",
+    "previous_sha256": "b27268bef69656928db4b360a835766bc765f31af66cee1a683b833311e78f1a",
+    "sha256": "08db5f65b40e29c7595de2f25b2559e40d9d7501130f879a1a8a61adafdbd873",
+    "expected_current_sha256": "ec53e046e9881ff9cf3bb6f55db57f9c9fdbea967345469829e6d7d9a8069b71"
+  },
+  {
+    "node": "mini",
+    "path": "/Users/tariqul/src/claude-atmos-workman/computer-mcp/atmos_computer/motion.py",
+    "backup": "/Users/tariqul/.claude/tools/workman-fleet-v1.1/backups/20260907T231731Z/motion.py",
+    "previous_sha256": "9f00e7842c9e1aeffe0f54e694a0901ba87429c57af627e092e060ee21174cd9",
+    "sha256": "315918154bc0a708fb1b64cd4daf0a45d49ae98ef48455033ab550eebeb79ea7",
+    "expected_current_sha256": "315918154bc0a708fb1b64cd4daf0a45d49ae98ef48455033ab550eebeb79ea7"
+  },
+  {
+    "node": "air",
+    "path": "/Users/muhammadtariqul/.claude/plugins/cache/atmosphere-ai/workman/0.3.0/computer-mcp/atmos_computer/motion.py",
+    "backup": "/Users/muhammadtariqul/.claude/tools/workman-fleet-v1.1/backups/20260907T231734Z/motion.py",
+    "previous_sha256": "1a54e264c9f8f2dea79d17e670325f3fe04fa2be151b45f3194f30d0a5e7bdde",
+    "sha256": "cb9e019dd0f079fed5fa74cb6f65e5f5368b40f5c3fa92f4ad1c01a0b6670b90",
+    "expected_current_sha256": "cb9e019dd0f079fed5fa74cb6f65e5f5368b40f5c3fa92f4ad1c01a0b6670b90"
+  },
+  {
+    "node": "machome",
+    "path": "/Users/amg/src/claude-atmos-workman/computer-mcp/atmos_computer/motion.py",
+    "backup": "/Users/amg/.claude/tools/workman-fleet-v1.1/backups/20260907T231734Z/motion.py",
+    "previous_sha256": "1a54e264c9f8f2dea79d17e670325f3fe04fa2be151b45f3194f30d0a5e7bdde",
+    "sha256": "cb9e019dd0f079fed5fa74cb6f65e5f5368b40f5c3fa92f4ad1c01a0b6670b90",
+    "expected_current_sha256": "cb9e019dd0f079fed5fa74cb6f65e5f5368b40f5c3fa92f4ad1c01a0b6670b90"
+  },
+  {
+    "path": "/home/monzurul/fleet-report.py",
+    "sha256": "6d27488cbf74e9558f6f69fb59117719ae258ec3dadbdf55fccc2fd6974487b4",
+    "previous_sha256": "4de6c3e5bf6c0c1e663c8b54b8d346a1600141a21a4d3ec7af14112700c67db4",
+    "backup": "/home/monzurul/.claude/tools/workman-fleet-v1.1/backups/20260907T220216Z/fleet-report.py",
+    "node": "dgx",
+    "expected_current_sha256": "6d27488cbf74e9558f6f69fb59117719ae258ec3dadbdf55fccc2fd6974487b4"
+  }
+]

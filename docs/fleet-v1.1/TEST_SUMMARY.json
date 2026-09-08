@@ -1,0 +1,126 @@
+{
+  "schema_version": 1,
+  "fleet_version": "1.1",
+  "status": "implementation_installed_acceptance_partial",
+  "checked_date": "2026-09-08",
+  "automated": {
+    "pytest": {
+      "passed": 432,
+      "seconds": 2.05,
+      "exit": 0
+    },
+    "browser_companion": {
+      "passed": 38,
+      "failed": 0,
+      "exit": 0
+    },
+    "mini_helper": {
+      "tests": 209,
+      "skipped": 16,
+      "exit": 0
+    },
+    "air_helper": {
+      "tests": 59,
+      "exit": 0
+    }
+  },
+  "devices": {
+    "dgx": {
+      "checked_at": "2026-09-08T00:21:00Z",
+      "helper_ok": true,
+      "ready": true,
+      "local_recorded": true,
+      "dgx_received": true
+    },
+    "mini": {
+      "checked_at": "2026-09-08T00:21:01Z",
+      "helper_ok": true,
+      "ready": true,
+      "local_recorded": true,
+      "dgx_received": true
+    },
+    "air": {
+      "checked_at": "2026-09-08T00:21:01Z",
+      "helper_ok": true,
+      "ready": true,
+      "local_recorded": true,
+      "dgx_received": true
+    },
+    "machome": {
+      "checked_at": "2026-09-08T00:21:01Z",
+      "helper_ok": true,
+      "ready": false,
+      "local_recorded": true,
+      "dgx_received": true
+    }
+  },
+  "air_workflows": {
+    "planned": 18,
+    "attempted": 14,
+    "completed": 13,
+    "interrupted": 1,
+    "not_started": 4,
+    "completed_exact": 13,
+    "completed_max_click_error_points": 0.0,
+    "completed_retries": 0,
+    "human_baseline": null,
+    "raw_caveman_comparison": null
+  },
+  "installed_plugin_idle": {
+    "seconds": 10.009827056004724,
+    "cpu_seconds": 0.0,
+    "rss_before": 57102336,
+    "rss_after": 57102336
+  },
+  "caveman_test_interface": {
+    "checked_at": "2026-09-08T00:19:43.911449+00:00",
+    "installed_path": "/home/monzurul/.codex/plugins/cache/personal/workman-fleet/1.1.0+codex.20260908001438",
+    "tools": [
+      "fleet_test_mode",
+      "fleet_onboard",
+      "fleet_control",
+      "fleet_recall",
+      "fleet_report",
+      "fleet_memory",
+      "fleet_verify"
+    ],
+    "resource_templates": [
+      "workman://tests/{test_id}/raw-style"
+    ],
+    "default_off": true,
+    "raw_resource_byte_exact": true,
+    "raw_bytes": 7022,
+    "raw_sha256": "c4d7354b4b063d54601fcdd5097a5b1713d1a1a2e386ac39efa438aa1ffef8ce",
+    "other_test_unmodified": true,
+    "off_verified": true,
+    "off_resource_read_refused": true,
+    "changes_global_style": false,
+    "desktop_input": false,
+    "model_api_calls": 0,
+    "scope": "Installed stdio MCP tool/resource integration only; no model comparison."
+  },
+  "v1.0_hashes": {
+    "codex-workman.toml": "34b0062c6e28bccd95b04dc4dd43559843dbd14ec35e5dd3dc4fc0cd24640f84",
+    "README.md": "084b9f7c93c1d395d57bb074cd1cdb9b9b891309706a4fd510564647f18f08cc",
+    "dgx-workman-source.tar.gz": "be879f285b58bbbe2b7c2010af0a2db2165b2dcfce0a8883f395c8ba28fbce86",
+    "SKILL.md": "74526aee2dac29269ae7d4dcbf35fc94272c8316ddf3200a07e1a37d474e3322",
+    "wm.py": "b19dc2280ba496fedff54c6fa131923b219940fc8ca20447c16f2b607217f842",
+    "mac-workman-helper-source.tar.gz": "bef385386d5daba88ba8b7a669036d7f32c84dbda6f1d031d05767cb1982b113"
+  },
+  "v1.0_verified": {
+    "codex-workman.toml": true,
+    "README.md": true,
+    "dgx-workman-source.tar.gz": true,
+    "SKILL.md": true,
+    "wm.py": true,
+    "mac-workman-helper-source.tar.gz": true
+  },
+  "limitations": [
+    "Air reserved for coordinator credentials; incomplete workflow/STOP/load benchmark",
+    "machome Screen Recording and Accessibility missing",
+    "final taskboard candidate compiled but not deployed",
+    "no human baseline",
+    "no matched raw Caveman model/token/cost trial",
+    "no incremental helper/panel memory baseline"
+  ]
+}

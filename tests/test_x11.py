@@ -88,6 +88,29 @@ class TestPointer:
                                           "screen": "0", "window": "23068676"}
 
 
+def test_drag_releases_mouse_when_motion_fails(monkeypatch):
+    calls = []
+    def run(cmd):
+        calls.append(cmd)
+        if cmd == ["xdotool", "mousemove", "30", "40"]:
+            raise RuntimeError("motion failed")
+    monkeypatch.setattr(x11, "_run", run)
+    monkeypatch.setattr(x11.time, "sleep", lambda _: None)
+    with pytest.raises(RuntimeError): x11.drag(10, 20, 30, 40)
+    assert calls[-1] == ["xdotool", "mouseup", "1"]
+
+
+def test_typing_uses_stdin_and_reports_command_failure(monkeypatch):
+    def run(cmd, **kwargs):
+        assert "private-sentinel" not in cmd
+        assert cmd[-2:] == ["--file", "-"]
+        assert kwargs["input_text"] == "private-sentinel"
+        return subprocess.CompletedProcess(cmd, 1)
+    monkeypatch.setattr(x11, "_require", lambda _: None)
+    monkeypatch.setattr(x11, "_run", run)
+    assert x11.type_text("private-sentinel")["ok"] is False
+
+
 class TestModifiedClick:
     def test_holds_and_releases_around_click(self, fake):
         x11.click_with(10, 20, modifiers=["ctrl", "shift"])

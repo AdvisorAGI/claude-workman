@@ -1,0 +1,7 @@
+{
+  "mcpServers": {
+    "fleet": {
+      "command": "${PLUGIN_ROOT}/scripts/launch.sh"
+    }
+  }
+}

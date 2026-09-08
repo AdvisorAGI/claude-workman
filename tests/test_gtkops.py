@@ -20,6 +20,14 @@ class FakeCompleted:
 
 
 class TestCall:
+    def test_explicit_system_gtk_interpreter_keeps_venv_unchanged(self, monkeypatch):
+        captured = {}
+        monkeypatch.setenv("WORKMAN_GTK_PYTHON", "/usr/bin/python3")
+        monkeypatch.setattr(gtkops.subprocess, "run", lambda cmd, **k:
+                            captured.update(cmd=cmd) or FakeCompleted('{"ok":true}'))
+        assert gtkops.call("windows")["ok"]
+        assert captured["cmd"][0] == "/usr/bin/python3"
+
     def test_parses_helper_json(self, monkeypatch):
         monkeypatch.setattr(gtkops.subprocess, "run",
                             lambda *a, **k: FakeCompleted(json.dumps({"ok": True, "n": 2})))

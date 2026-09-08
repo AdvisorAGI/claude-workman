@@ -22,8 +22,8 @@ def _env() -> dict:
     return e
 
 
-def _run(cmd: list[str], timeout: int = 20) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, env=_env(), capture_output=True, text=True, timeout=timeout)
+def _run(cmd: list[str], timeout: int = 20, input_text: str | None = None) -> subprocess.CompletedProcess:
+    return subprocess.run(cmd, env=_env(), capture_output=True, text=True, timeout=timeout, input=input_text)
 
 
 def _require(binary: str) -> None:
@@ -146,8 +146,14 @@ def move(x: int, y: int) -> dict:
 
 def drag(from_x: int, from_y: int, to_x: int, to_y: int) -> dict:
     emit_cursor("move", from_x, from_y)
-    _run(["xdotool", "mousemove", str(from_x), str(from_y), "mousedown", "1",
-          "mousemove", str(to_x), str(to_y), "mouseup", "1"])
+    _run(["xdotool", "mousemove", str(from_x), str(from_y)])
+    _run(["xdotool", "mousedown", "1"])
+    try:
+        time.sleep(0.08)  # Let the window manager start the drag before motion.
+        _run(["xdotool", "mousemove", str(to_x), str(to_y)])
+        time.sleep(0.08)
+    finally:
+        _run(["xdotool", "mouseup", "1"])
     emit_cursor("click", to_x, to_y)
     return {"ok": True, "from": [from_x, from_y], "to": [to_x, to_y]}
 
@@ -162,7 +168,9 @@ def scroll(direction: str, amount: int = 3) -> dict:
 
 def type_text(text: str, delay_ms: int = 40) -> dict:
     _require("xdotool")
-    _run(["xdotool", "type", "--delay", str(delay_ms), text])
+    result = _run(["xdotool", "type", "--delay", str(delay_ms), "--file", "-"], input_text=text)
+    if result.returncode:
+        return {"ok": False, "error": "typing command failed"}
     return {"ok": True, "typed_len": len(text)}
 
 

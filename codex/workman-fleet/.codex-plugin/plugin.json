@@ -1,0 +1,26 @@
+{
+  "name": "workman-fleet",
+  "version": "1.1.0+codex.20260908001438",
+  "description": "Workman fleet control and evidence-backed learning across DGX, mini, Air and machome.",
+  "author": {
+    "name": "Local Workman fleet"
+  },
+  "skills": "./skills/",
+  "interface": {
+    "displayName": "Workman Fleet 1.1",
+    "shortDescription": "Control the fleet and reuse verified device lessons.",
+    "longDescription": "A single Workman entry point over existing authenticated SSH, with explicit devices, focus guards and local learning reported to the DGX.",
+    "developerName": "Local Workman fleet",
+    "category": "Productivity",
+    "capabilities": [
+      "Read",
+      "Write"
+    ],
+    "defaultPrompt": [
+      "Show the Workman fleet status and permission gates.",
+      "Read fleet lessons, then capture the Mac mini screen."
+    ]
+  },
+  "mcpServers": "./.mcp.json",
+  "license": "MIT"
+}

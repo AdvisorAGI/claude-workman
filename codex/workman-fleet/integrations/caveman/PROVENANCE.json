@@ -1,0 +1,29 @@
+{
+  "repository": "https://github.com/JuliusBrussee/caveman",
+  "revision": "15581d14007fd01fb3f132016741962f34936ca2",
+  "version": "2.6.0",
+  "checked_at": "2026-09-08",
+  "files": {
+    "SKILL.md": {
+      "upstream_path": "skills/caveman/SKILL.md",
+      "sha256": "c4d7354b4b063d54601fcdd5097a5b1713d1a1a2e386ac39efa438aa1ffef8ce",
+      "bytes": 7022
+    },
+    "LICENSE": {
+      "upstream_path": "LICENSE",
+      "sha256": "94fe75d355887f84ee7eefca68e06d8d082a23dad47a8e1f58a94d98900edf5b",
+      "bytes": 1433
+    },
+    "LICENSING.md": {
+      "upstream_path": "LICENSING.md",
+      "sha256": "84e8dfe4096a9989640ed5d544355cc8878a874346245ec3b643bd5001c7b106",
+      "bytes": 5144
+    },
+    "package.json": {
+      "upstream_path": "package.json",
+      "sha256": "867c4a6a6a651514119165a034514f2f7f76cfaabdd1c471cfb391e803df3e5e",
+      "bytes": 1026
+    }
+  },
+  "scope": "Unmodified MIT response skill and provenance only; no upstream executable/hooks/proxy/telemetry installed."
+}
