@@ -4,7 +4,7 @@ No human-relative score until a person performs identical trials. 'human' here
 means smooth pointer automation; keyboard cadence is the existing helper's.
 No network page, account, clipboard, customer API or real business submission.
 """
-import argparse,asyncio,base64,hashlib,json,math,shlex,statistics,subprocess,sys,time
+import argparse,asyncio,base64,hashlib,json,math,shlex,statistics,subprocess,sys,time,uuid
 from pathlib import Path
 sys.path.insert(0,str(Path(__file__).resolve().parents[1]/'scripts'))
 import fleet
@@ -28,6 +28,23 @@ def exact(observed,text):
     return observed.get('chars')==len(text) and observed.get('sha256')==hashlib.sha256(text.encode()).hexdigest()
 
 
+def trial_counts(planned,attempted,results):
+    if not 0 <= len(results) <= attempted <= planned: raise ValueError('inconsistent benchmark counts')
+    return {'planned':planned,'attempted':attempted,'not_attempted':planned-attempted,
+            'completed':sum(r.get('success') is True for r in results)}
+
+
+async def cleanup_fixture(fixture_pid,region,original,pointer):
+    active=await fleet.control('air','active')
+    if fixture_pid and region is not None and (active.get('data') or {}).get('pid')==fixture_pid:
+        closed=await fleet.control('air','click',{'x':region['x']+316,'y':region['y']+202})
+        finished=await fleet.control('air','finish',{'restore_focus':original['app'],'restore_x':round(pointer['x']),'restore_y':round(pointer['y'])})
+        return {'mode':'restore_owned_fixture','close_code':closed.get('code'),
+                'finish_ok':finished.get('ok'),'restoration':(finished.get('data') or {}).get('restoration')}
+    released=await fleet.control('air','release')
+    return {'mode':'release_without_input','release_ok':released.get('ok')}
+
+
 async def run(out,repeats=3,start_at=0):
     out.mkdir(parents=True,exist_ok=True);out.chmod(0o700)
     status=await fleet.control('air','status');require_ready(status)
@@ -43,15 +60,18 @@ async def run(out,repeats=3,start_at=0):
         return p.stdout
     original=(await call('active'))['data'];pointer=(await call('pointer'))['data']
     reserved=await call('reserve',{'seconds':300})
-    results=[];fixture_pid=None;current=None;failure=None;index=0
+    results=[];fixture_pid=None;region=None;current=None;failure=None;index=0;attempted=0
+    state_path=root+'/benchmark-result-'+uuid.uuid4().hex+'.json'
+    fixture_title='Workman v1.1 Input Check '+uuid.uuid4().hex[:8]
     try:
         # Source setup only after grants pass; fixed private fixture with no observer.
         source=Path(__file__).with_name('gui_fixture.py').read_bytes()
         remote([c['python'],'-c',"from pathlib import Path;import sys;p=Path.home()/'.claude/tools/workman-fleet-v1.1/gui_fixture.py';p.write_bytes(sys.stdin.buffer.read())"],source)
-        launch=shlex.join([c['python'],root+'/gui_fixture.py',root+'/benchmark-result.json'])
-        subprocess.run(fleet.SSH+[c['ssh'],'nohup '+launch+' >/tmp/workman-benchmark-fixture.log 2>&1 </dev/null &'],capture_output=True,check=True,timeout=10)
+        launcher="import subprocess,sys;p=subprocess.Popen(sys.argv[1:],stdin=subprocess.DEVNULL,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,start_new_session=True);print(p.pid)"
+        fixture_pid=int(remote([c['python'],'-c',launcher,c['python'],root+'/gui_fixture.py',state_path,fixture_title]))
+        fixture=None
         for _ in range(10):
-            wins=(await call('windows'))['data'];fixture=next((w for w in wins if w.get('title')=='Workman v1.1 Input Check'),None)
+            wins=(await call('windows'))['data'];fixture=next((w for w in wins if w.get('title')==fixture_title and w.get('pid')==fixture_pid),None)
             if fixture:break
             await asyncio.sleep(.3)
         if not fixture:raise RuntimeError('Fixture did not appear')
@@ -63,8 +83,9 @@ async def run(out,repeats=3,start_at=0):
                     trial_index=index;index+=1
                     if trial_index<start_at:continue
                     current={'trial_index':trial_index,'repeat':repeat,'mode':mode,'scenario':scenario}
+                    attempted+=1
                     require_ready(await call('status'))
-                    await call('focus',{'query':'Workman v1.1 Input Check'})
+                    await call('focus',{'query':fixture_title})
                     before=await call('shot',{'region':region});before['data'].pop('image')
                     t=time.perf_counter();click=await call('click',{'x':entry[0],'y':entry[1],'motion':mode,'speed':1})
                     active=(await call('active'))['data'];token=active['focus_token']
@@ -74,11 +95,11 @@ async def run(out,repeats=3,start_at=0):
                     marked=await call('click',{'x':mark[0],'y':mark[1],'motion':mode,'speed':1})
                     latency=(time.perf_counter()-t)*1000
                     p=(await call('pointer'))['data']
-                    observed=json.loads(remote(['cat',root+'/benchmark-result.json']))
+                    observed=json.loads(remote(['cat',state_path]))
                     shot=await call('shot',{'region':region})
                     filename=f'{repeat}-{mode}-{scenario}.png'
                     (out/filename).write_bytes(base64.b64decode(shot['data'].pop('image')))
-                    results.append({'repeat':repeat,'mode':mode,'scenario':scenario,'success':exact(observed,text) and observed['clicks']==len(results)+1,
+                    results.append({'trial_index':trial_index,'repeat':repeat,'mode':mode,'scenario':scenario,'success':exact(observed,text) and observed['clicks']==len(results)+1,
                         'exact_text':exact(observed,text),'chars':observed['chars'],'digest':observed['sha256'],'click_error_points':math.dist((p['x'],p['y']),mark),
                         'retries':0,'task_ms':latency,'type_ms':typed['elapsed_ms'],'pointer_click_ms':marked['elapsed_ms'],'action_event':typed['event']['id'],'capture_event':shot['event']['id'],'screenshot':filename})
                     if not results[-1]['success']:raise RuntimeError('Fixture mismatch: stopped without input retry')
@@ -90,18 +111,17 @@ async def run(out,repeats=3,start_at=0):
         failure={'trial':current,'code':code,'automatic_retry':False}
         raise
     finally:
-        active=await fleet.control('air','active')
-        if fixture_pid and active.get('data',{}).get('pid')==fixture_pid:
-            # Own fixture close, then original app/pointer. Never move over takeover.
-            await fleet.control('air','click',{'x':x+316,'y':y+202})
-            await fleet.control('air','finish',{'restore_focus':original['app'],'restore_x':round(pointer['x']),'restore_y':round(pointer['y'])})
-        else:await fleet.control('air','release')
-        planned=repeats*6-start_at;attempted=len(results)+(1 if failure else 0)
-        report={'trials':results,'planned':planned,'attempted':attempted,'not_attempted':planned-attempted,'failure':failure,'start_at':start_at,
+        # Never click guessed coordinates if fixture launch/window discovery failed.
+        try:cleanup=await cleanup_fixture(fixture_pid,region,original,pointer)
+        except Exception:
+            cleanup={'mode':'cleanup_failed'}
+            try:cleanup['release_ok']=(await fleet.control('air','release')).get('ok')
+            except Exception:cleanup['release_ok']=False
+        report={'trials':results,**trial_counts(repeats*6-start_at,attempted,results),'failure':failure,'start_at':start_at,
                 'human_baseline':None,'human_baseline_state':'missing: person must run identical trials',
                 'comparison':'direct pointer vs smooth pointer automation; same existing keyboard cadence',
                 'stop_latency':'not measured by this runner','cpu_memory_idle':'measure separately; do not infer from planner cost',
-                'gate_observation':status['event']['id'],'retries':0}
+                'gate_observation':status['event']['id'],'retries':0,'fixture_pid':fixture_pid,'fixture_state_path':state_path,'cleanup':cleanup}
         (out/'results.json').write_text(json.dumps(report,indent=2))
 
 

@@ -1,0 +1,59 @@
+{
+  "schema_version": 1,
+  "scope": "Air adapter update and benchmark recovery preparation",
+  "status": "installed_readonly_verified_owner_use_question_pending",
+  "tests": {
+    "passed": 464,
+    "seconds": 2.06,
+    "exit": 0
+  },
+  "installed": {
+    "installed_version": "1.1.0+codex.20260908012019",
+    "tools": [
+      "fleet_observe",
+      "fleet_test_mode",
+      "fleet_onboard",
+      "fleet_control",
+      "fleet_recall",
+      "fleet_report",
+      "fleet_memory",
+      "fleet_verify"
+    ],
+    "air_status_ok": true,
+    "air_grants": {
+      "screen_recording": true,
+      "accessibility": true
+    },
+    "local_recorded": true,
+    "dgx_reporting": {
+      "ok": true,
+      "received": 1
+    },
+    "air_lease": {
+      "available": true,
+      "owned_by_this_session": false,
+      "remaining_seconds": 0,
+      "scope": "Workman Fleet v1.1 clients; legacy direct tools do not participate"
+    },
+    "raw_caveman_test_off": true,
+    "configured_model": "gpt-6-astra",
+    "configured_effort": "xhigh",
+    "configured_service_tier": null,
+    "screen_capture": false,
+    "input": false,
+    "model_api_calls": 0
+  },
+  "rollback": [
+    {
+      "path": "/Users/muhammadtariqul/.claude/tools/workman-fleet-v1.1/device.py",
+      "backup_valid": true,
+      "current_matches": true
+    }
+  ],
+  "coordinator_old_release_event": "359ae75b913148e08b8757ae2f756d9d",
+  "successor_task": "01a07e6a-95ea-7c71-89a9-e4c1dc9d3e52",
+  "successor_reserves_air": false,
+  "input_performed": false,
+  "raw_unreviewed_capture_discarded": true,
+  "current_gate": "Owner clarification whether Air verification pages remain in use; no agent lease is being held."
+}

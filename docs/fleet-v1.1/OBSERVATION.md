@@ -1,5 +1,10 @@
 # Compact observations, 2026-09-08
 
+Coordination correction: the old Air lease ended at 00:23:46 UTC. The assumption
+below that it remained reserved was stale. The successor has no Air reservation;
+the adapter update is now installed. See AIR_ACCEPTANCE_CONTINUATION.md for the
+fresh checks and current owner-use question. No new input timing is claimed.
+
 Status: opt-in interface implemented, tested and installed. The owner targets
 70-80% fewer total tokens while retaining full reasoning and accurate control.
 That target is not met or promised by these payload measurements. The model

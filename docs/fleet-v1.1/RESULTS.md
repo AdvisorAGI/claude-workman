@@ -1,5 +1,15 @@
 # Workman fleet v1.1 verification
 
+Current Air coordination, 2026-09-08: the old coordinator released its lease at
+00:23:46 UTC. The successor confirms no Air reservation. Fresh checks found both
+grants enabled, and the source adapter update is now installed on Air. Live input
+is awaiting clarification of owner use because verification pages were open;
+no input was performed and the short inspection lease was released. See
+[AIR_ACCEPTANCE_CONTINUATION.md](AIR_ACCEPTANCE_CONTINUATION.md). Earlier reservation
+and source-only Air statements below are historical and superseded by this note.
+Latest tested installation: **1.1.0+codex.20260908012019**, eight tools,
+**464 automated tests passed**. Existing features and earlier commits are retained.
+
 Latest addition, 2026-09-08 00:51 UTC: opt-in `fleet_observe` is installed as the
 eighth tool; **456 tests pass**. A live read-only DGX capsule was 11.597% smaller
 than the equivalent full response with the same receipt. This is not a total-token

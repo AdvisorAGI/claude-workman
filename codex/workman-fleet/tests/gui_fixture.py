@@ -10,6 +10,7 @@ import sys
 from pathlib import Path
 
 OUT = Path(sys.argv[1])
+TITLE = sys.argv[2] if len(sys.argv) > 2 else "Workman v1.1 Input Check"
 STATE = {"clicks": 0, "chars": 0, "sha256": hashlib.sha256(b"").hexdigest(), "pid": os.getpid()}
 
 
@@ -38,8 +39,7 @@ if sys.platform == "darwin":
 
         def close_(self, sender):
             save(str(entry.stringValue()))
-            app.stop_(None)
-            app.abortModal()
+            app.terminate_(None)
 
     app = A.NSApplication.sharedApplication()
     app.setActivationPolicy_(A.NSApplicationActivationPolicyRegular)
@@ -56,7 +56,7 @@ if sys.platform == "darwin":
     app.setMainMenu_(menu)
     window = A.NSWindow.alloc().initWithContentRect_styleMask_backing_defer_(
         F.NSMakeRect(60, 200, 420, 230), A.NSWindowStyleMaskTitled | A.NSWindowStyleMaskClosable | A.NSWindowStyleMaskResizable | A.NSWindowStyleMaskMiniaturizable, A.NSBackingStoreBuffered, False)
-    window.setTitle_("Workman v1.1 Input Check")
+    window.setTitle_(TITLE)
     controller = Controller.alloc().init()
     window.setDelegate_(controller)
     label = A.NSTextField.labelWithString_("Clicks: 0")
@@ -78,7 +78,7 @@ else:
     import gi
     gi.require_version("Gtk", "3.0")
     from gi.repository import Gtk
-    window = Gtk.Window(title="Workman v1.1 Input Check")
+    window = Gtk.Window(title=TITLE)
     window.set_default_size(420, 230); window.move(35, 220)
     window.connect("destroy", Gtk.main_quit)
     box = Gtk.Box(orientation=Gtk.Orientation.VERTICAL, spacing=18)
