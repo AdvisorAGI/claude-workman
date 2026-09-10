@@ -992,8 +992,12 @@ def resolve(action: str, app: str | None = None,
 
     entry, source, group = _entry(name or "", layer)
     if entry is None:
+        # Learned store fills the gap for apps the static table never saw.
+        learned = _learned_hit(name or "", app=app, platform=where)
+        if learned is not None:
+            return learned
         out["error"] = f"no such action {requested!r}"
-        pool = sorted(_suggestion_pool(layer))
+        pool = sorted(_suggestion_pool(layer) | _learned_actions(app, where))
         # Only genuine near-matches go in here. Padding the list with whatever
         # sorts first would dress unrelated actions up as suggestions, which is
         # the same false confidence a guessed chord would give.
@@ -1003,7 +1007,8 @@ def resolve(action: str, app: str | None = None,
         out["note"] = (
             f"known in the {', '.join(elsewhere)} layer; pass app="
             f"'{elsewhere[0]}'" if elsewhere else
-            "list_actions() shows every action with its chord")
+            "list_actions() shows every action; shortcut_learn(app) harvests "
+            "menu chords for apps not in the static table")
         return out
 
     row = entry[where]
@@ -1019,6 +1024,10 @@ def resolve(action: str, app: str | None = None,
     note_prefix = out["note"]
     out["note"] = f"{note_prefix} {note}".strip() if note_prefix else note
     if keys is None:
+        # Static says unsupported — a learned chord for this app still wins.
+        learned = _learned_hit(name or "", app=app, platform=where)
+        if learned is not None and learned.get("keys"):
+            return learned
         out["unsupported"] = True
         out["error"] = f"{name} has no keyboard shortcut on {where}"
         if route:
@@ -1030,6 +1039,39 @@ def resolve(action: str, app: str | None = None,
     out["ok"] = True
     out["keys"] = keys
     return out
+
+
+def _learned_hit(action: str, app: str | None, platform: str) -> dict | None:
+    try:
+        from . import learned_shortcuts
+    except Exception:
+        return None
+    row = learned_shortcuts.lookup(action, app=app, platform=platform)
+    if not row or not row.get("keys"):
+        return None
+    return {
+        "ok": True,
+        "action": str(row.get("action") or action),
+        "keys": row["keys"],
+        "platform": platform,
+        "app": row.get("app_key") or app,
+        "group": "app",
+        "source": "learned",
+        "note": f"from {row.get('source') or 'learned'} store "
+                f"({row.get('label') or row.get('action')})",
+        "what": str(row.get("label") or ""),
+        "menu_path": list(row.get("menu_path") or []),
+        "learned": True,
+    }
+
+
+def _learned_actions(app: str | None, platform: str) -> set[str]:
+    try:
+        from . import learned_shortcuts
+    except Exception:
+        return set()
+    return {str(r.get("action") or "") for r in learned_shortcuts.list_for(app, platform)
+            if r.get("action")}
 
 
 def lookup_many(actions: list[str], app: str | None = None,
@@ -1050,13 +1092,16 @@ def list_actions(app: str | None = None, platform: str | None = None,
     if layer is not None and layer not in _APPS:
         layer = None
     wanted = _norm(group, {}) if group else None
-    rows = [resolve(name, app=layer, platform=platform)
-            for name in _survey_actions(layer)]
+    names = set(_survey_actions(layer)) | _learned_actions(app, _norm(platform, _PLATFORM_ALIASES) or detect_platform())
+    rows = [resolve(name, app=app if app else layer, platform=platform)
+            for name in names if name]
+    # Drop pure misses so a learned survey stays usable.
+    rows = [row for row in rows if row.get("ok") or row.get("unsupported")]
     if wanted:
         rows = [row for row in rows if row.get("group") == wanted]
     return sorted(rows, key=lambda row: (GROUPS.index(row["group"])
-                                         if row["group"] in GROUPS else 99,
-                                         row["action"] or ""))
+                                         if row.get("group") in GROUPS else 99,
+                                         row.get("action") or ""))
 
 
 # ---------------------------------------------------------------------------

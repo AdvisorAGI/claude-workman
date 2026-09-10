@@ -21,10 +21,11 @@ def _paths(n=16, **kwargs):
 
 
 class TestCadenceBounds:
-    def test_letter_delays_stay_in_50_300(self):
+    def test_letter_delays_stay_in_char_band(self):
         delays = human.typing_cadence("helloworld" * 8, rng=random.Random(0))
         assert delays
-        assert all(50 <= d <= 300 for d in delays)
+        lo, hi = human.CHAR_DELAY_MS
+        assert all(lo <= d <= hi for d in delays)
 
     def test_space_gaps_are_longer_than_intra_word(self):
         text = "ab cd ef gh ij kl mn op"
@@ -32,11 +33,13 @@ class TestCadenceBounds:
         letters = [d for ch, d in zip(text, delays) if ch.isalpha()]
         spaces = [d for ch, d in zip(text, delays) if ch == " "]
         assert spaces and letters
-        assert all(150 <= d <= 300 for d in spaces)
-        assert all(50 <= d <= 300 for d in letters)
+        slo, shi = human.SPACE_DELAY_MS
+        clo, chi = human.CHAR_DELAY_MS
+        assert all(slo <= d <= shi for d in spaces)
+        assert all(clo <= d <= chi for d in letters)
         assert sum(spaces) / len(spaces) > sum(letters) / len(letters)
 
-    def test_enter_is_never_faster_than_150ms(self):
+    def test_enter_is_never_faster_than_floor(self):
         delays = human.typing_cadence("hi\n", rng=random.Random(2))
         assert delays[-1] >= human.ENTER_MIN_MS
 
@@ -48,11 +51,11 @@ class TestCadenceBounds:
     def test_enter_delay_floor(self):
         rng = random.Random(3)
         samples = [human.enter_delay_ms(rng) for _ in range(20)]
-        assert all(s >= 150 for s in samples)
+        assert all(s >= human.ENTER_MIN_MS for s in samples)
 
 
 class TestEasedPath:
-    def test_step_count_is_8_to_20(self):
+    def test_step_count_stays_in_path_band(self):
         for path in _paths():
             assert human.PATH_STEPS[0] <= len(path) <= human.PATH_STEPS[1]
 
@@ -96,11 +99,13 @@ class TestEasedPath:
 
     def test_short_move_is_near_minimum_duration(self):
         path = human.eased_path(0, 0, 1, 0, rng=random.Random(3))
-        assert 300 <= path[-1][2] <= 400
+        lo, _hi = human.PATH_DURATION_MS
+        assert lo <= path[-1][2] <= lo + 80
 
     def test_long_move_is_near_maximum_duration(self):
         path = human.eased_path(0, 0, 5000, 5000, rng=random.Random(3))
-        assert 800 <= path[-1][2] <= 900
+        _lo, hi = human.PATH_DURATION_MS
+        assert hi - 40 <= path[-1][2] <= hi
 
     def test_overshoot_sometimes_corrects(self):
         found = False

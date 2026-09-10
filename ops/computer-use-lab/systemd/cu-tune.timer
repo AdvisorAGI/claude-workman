@@ -1,0 +1,12 @@
+[Unit]
+Description=Workman computer-use daily tune (30 min max, skip if nothing to learn)
+Documentation=file:%h/ops/computer-use-lab/DESIGN.md
+
+[Timer]
+OnCalendar=*-*-* 14:00:00 Asia/Dhaka
+Persistent=true
+RandomizedDelaySec=120
+AccuracySec=1min
+
+[Install]
+WantedBy=timers.target

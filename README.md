@@ -84,6 +84,14 @@ macOS AXUIElement-based computer use, ported to Linux via AT-SPI2 (`gi.repositor
 | `batch` | Run several actions in one round-trip |
 | `show_cursor` | Visual click cursor overlay: a ring + click ripple showing exactly where the agent is acting |
 
+**Memory (token-light)**
+
+| Tool | What it does |
+|------|--------------|
+| `cu_memory` | One tool, always `{ok, op, n, lines}` (~1600 chars). Working checklist, valid facts, history. Same shape for local Qwen and frontier models |
+| `cu_skill_recall` | Short taught skills (`s:title \| app \| steps`). Call before inventing clicks |
+| `cu_skill_teach` | Save one verified skill. No secrets |
+
 ### Coordinates, and why `zoom` exists
 
 Every vision model shrinks an oversized image before it sees it. Hand over a 4K grab and let

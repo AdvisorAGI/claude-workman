@@ -1,0 +1,6 @@
+{"task_id":"frontmost-title","task":"Read the frontmost window title on this DGX desktop, screenshot to confirm, then remember how you did it.","app":"","post":"report the exact window title"}
+{"task_id":"calc-12x7","task":"Open Calculator (or gnome-calculator), compute 12*7, leave 84 showing, screenshot the result, remember the chord/path.","app":"Calculator","post":"display shows 84"}
+{"task_id":"term-hostname","task":"Focus a terminal on this DGX, run hostname, leave the output visible, screenshot, remember how you focused and typed.","app":"terminal","post":"hostname visible in the terminal"}
+{"task_id":"files-home","task":"Open the Files/Nautilus window on this DGX, go to the home folder, screenshot the location, remember the shortcut.","app":"Files","post":"home folder is the visible location"}
+{"task_id":"workspace-list","task":"List on-screen windows with Workman, screenshot, name the three largest, remember the list_windows path.","app":"","post":"three window names reported"}
+{"task_id":"shortcut-paste","task":"Focus a text field on this DGX (gedit or a terminal), paste a short harmless string via clipboard then Return, screenshot, remember paste-not-type.","app":"","post":"pasted string is visible"}

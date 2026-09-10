@@ -204,11 +204,41 @@ def list_windows() -> list[dict]:
 
 
 @mcp.tool()
-def focus_window(query: str, minimize_blockers: bool = True) -> dict:
+def focus_window(query: str, minimize_blockers: bool = True,
+                 learn_shortcuts: bool = True) -> dict:
     """Raise a window by id or name-substring. On focus-stealing WMs (e.g.
     mutter) plain activation can silently fail, so the frontmost blocker is
-    minimized first. Always screenshot to verify focus before typing."""
-    return desktop.focus_window(query, minimize_blockers=minimize_blockers)
+    minimized first. Always screenshot to verify focus before typing.
+
+    When `learn_shortcuts` is true (default), the first focus of an app this
+    week harvests its menu-bar chords into the durable learned-shortcuts store
+    so later `shortcut()` calls never forget them. Harvest failure never fails
+    the focus itself.
+    """
+    result = desktop.focus_window(query, minimize_blockers=minimize_blockers)
+    if not learn_shortcuts:
+        return result
+    app = ""
+    if isinstance(result, dict):
+        app = str((result.get("app") or result.get("name")
+                   or (result.get("window") or {}).get("app")
+                   or "")).strip()
+    if not app:
+        try:
+            active = desktop.active_window()
+            if isinstance(active, dict):
+                app = str(active.get("app") or active.get("name") or "").strip()
+        except Exception:
+            app = ""
+    if app:
+        try:
+            from . import learned_shortcuts
+            result = dict(result) if isinstance(result, dict) else {"focus": result}
+            result["shortcuts_learned"] = learned_shortcuts.ensure_learned(app)
+        except Exception as exc:
+            if isinstance(result, dict):
+                result["shortcuts_learned"] = {"ok": False, "error": str(exc)}
+    return result
 
 
 @mcp.tool()
@@ -1112,9 +1142,66 @@ def shortcut_list(app: str | None = None, platform: str | None = None,
     """Every action that has a chord here, for finding out what is available.
 
     Filter with `group`: window, tabs, navigation, editing, text_motion, system,
-    app. Read this before deciding a task needs the mouse.
+    app. Read this before deciding a task needs the mouse. Includes chords
+    harvested into the learned store for this app.
     """
     return shortcuts.list_actions(app=app, platform=platform, group=group)
+
+
+@mcp.tool()
+def shortcut_learn(app: str, force: bool = False) -> dict:
+    """Harvest an app's menu-bar keyboard shortcuts and store them forever.
+
+    Call on first use of an unfamiliar app (also runs automatically from
+    focus_window). macOS reads AX menu key equivalents; Linux/Windows return
+    a clear note until those harvesters land. Re-harvest is skipped for a week
+    unless force=True.
+    """
+    from . import learned_shortcuts
+    return learned_shortcuts.ensure_learned(app, force=force)
+
+
+@mcp.tool()
+def shortcut_learned(app: str | None = None,
+                     platform: str | None = None) -> dict:
+    """List durable learned chords (local + fleet mirrors)."""
+    from . import learned_shortcuts
+    rows = learned_shortcuts.list_for(app, platform)
+    return {
+        "ok": True,
+        "count": len(rows),
+        "path": str(learned_shortcuts.shortcuts_path()),
+        "shortcuts": rows,
+    }
+
+
+@mcp.tool()
+def cu_skill_recall(query: str, app: str = "", limit: int = 3) -> dict:
+    """Short taught skills. Returns {ok,n,lines}. Call before inventing clicks."""
+    from . import cu_memory, cu_skills
+    return cu_memory.from_skills(cu_skills.recall(query, app=app, limit=limit, compact=True))
+
+
+@mcp.tool()
+def cu_skill_teach(title: str, steps: list[dict] | str, app: str = "",
+                   platform: str = "", notes: str = "",
+                   source: str = "session") -> dict:
+    """Save one verified skill. steps=[{action,value}]. No secrets."""
+    from . import cu_skills
+    return cu_skills.teach(title, steps, app=app, platform=platform,
+                           notes=notes, source=source)
+
+
+@mcp.tool()
+def cu_memory(op: str, q: str = "", items: list[str] | None = None) -> dict:
+    """Tiny computer-use memory. Always {ok,op,n,lines}. Same shape for Qwen and frontier.
+
+    op: status | working | tick | recall | fact | forget | history | board
+    working: pass items=[...] checklist. tick: q=item text. fact: q='subj | pred | obj'.
+    recall: q=query (skills + valid facts). forget: q=fact id or text.
+    """
+    from . import cu_memory as mem
+    return mem.handle(op, q=q, items=items)
 
 
 @mcp.tool()

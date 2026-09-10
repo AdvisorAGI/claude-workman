@@ -2,6 +2,26 @@
 
 All notable changes to claude-workman.
 
+## [Unreleased]
+
+### Added — token-light computer-use memory
+
+- **`cu_memory`** — one MCP tool, always `{ok, op, n, lines}` under ~1600 characters
+  so local Qwen and frontier models share the same shape. Ops: status, working,
+  tick, recall, fact, forget, history, board. Small-model aliases (`done`, `remember`,
+  stuffing the query into `op`).
+- **Working memory** (`working.json`) — remaining checklist only (ATMem), not a
+  screenshot archive. Opened by `episode.start`, closed with the judged outcome.
+- **Temporal facts** (`facts.jsonl`) — `subject | predicate | object` with
+  `valid_from` / `valid_to`. A new value supersedes the old one instead of stacking.
+- Tuner prompts capped at 1200 chars (`ops/computer-use-lab/brief.py`); Qwen prompt
+  hard-cap 4000 chars. Journal tails are 5 kind/tool lines, not 40 raw rows.
+- Optional additive `wl.*` schema in `ops/computer-use-lab/sql/001_wl.sql`.
+
+### Changed
+
+- `cu_skill_recall` returns short `lines` (no `steps_v2`) so the tool result stays small.
+
 ## [0.3.0] — 2026-09-02
 
 ### Added — macOS and Windows

@@ -22,15 +22,18 @@ import time
 
 from . import desktop
 
-CHAR_DELAY_MS = (50, 300)
-SPACE_DELAY_MS = (150, 300)
-ENTER_MIN_MS = 150
+# Skilled-person cadence. These are a fast typist and a Fitts-like flick,
+# not a cautious hunt-and-peck and not a teleport. Bounds stay jittered so
+# a site watching inter-key or pointer velocity still sees a hand.
+CHAR_DELAY_MS = (40, 140)
+SPACE_DELAY_MS = (80, 200)
+ENTER_MIN_MS = 90
 CLICK_PRESS_MS = (60, 140)
 AIM_PAUSE_MS = (20, 80)
 AIM_PAUSE_CHANCE = 0.4
 PATH_WAYPOINTS = (4, 6)
-PATH_STEPS = (8, 20)
-PATH_DURATION_MS = (300, 900)
+PATH_STEPS = (6, 14)
+PATH_DURATION_MS = (160, 520)
 ENDPOINT_JITTER_PX = (1, 3)
 OVERSHOOT_CHANCE = 0.28
 OVERSHOOT_PX = (4, 12)
@@ -266,10 +269,10 @@ def eased_path(x0: float, y0: float, x1: float, y1: float,
                rng: random.Random | None = None) -> list[tuple[int, int, int]]:
     """Pointer path as (x, y, t_ms).
 
-    4–6 Bezier waypoints, sampled into 8–20 eased steps over 300–900 ms
+    4–6 Bezier waypoints, sampled into 6–14 eased steps over 160–520 ms
     (scaled by distance). Endpoint jitter is 1–3 px. Occasional tiny
     overshoot-and-correct is folded into the same step budget so the
-    returned path stays 8–20 points. Timing is monotonic.
+    returned path stays 6–14 points. Timing is monotonic.
     """
     rng = resolve_rng(rng)
     start = (float(x0), float(y0))
@@ -325,8 +328,8 @@ def eased_path(x0: float, y0: float, x1: float, y1: float,
 def typing_cadence(text: str, rng: random.Random | None = None) -> list[int]:
     """Per-character delays in milliseconds.
 
-    50–300 ms normally; space gets a longer gap (150–300 ms). Enter/newline
-    is never faster than 150 ms after the previous character.
+    40–140 ms normally (~80–120 WPM); space gets a longer gap (80–200 ms).
+    Enter/newline is never faster than 90 ms after the previous character.
     """
     rng = resolve_rng(rng)
     delays: list[int] = []

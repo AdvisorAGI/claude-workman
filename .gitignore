@@ -7,3 +7,5 @@ dist/
 venv/
 *.png
 .DS_Store
+*.bak
+ops/computer-use-lab/runs/
