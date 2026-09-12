@@ -20,6 +20,7 @@ Env:
 
 from __future__ import annotations
 
+import hashlib
 import json
 import os
 import re
@@ -77,6 +78,14 @@ def journal(tool: str, payload: dict[str, Any] | None = None) -> None:
             "tool": tool,
             "payload": redact(payload or {}),
         }
+        try:
+            from . import episode as _episode
+            row = _episode.stamp(row)
+        except Exception:
+            uid = os.environ.get("WORKMAN_EPISODE_UID")
+            if uid:
+                row["episode_uid"] = uid
+                row["task"] = os.environ.get("WORKMAN_TASK") or None
         line = json.dumps(row, ensure_ascii=False, separators=(",", ":"), default=str)
         with JOURNAL.open("a", encoding="utf-8") as fh:
             fh.write(line + "\n")
@@ -112,6 +121,11 @@ def archive_capture(data: bytes, fmt: str, tool: str) -> str | None:
         name = "%s-%d-%s.%s" % (time.strftime("%H%M%SZ", time.gmtime()), os.getpid(), tool, ext)
         path = day / name
         path.write_bytes(data)
+        try:
+            from . import working
+            working.observe(hashlib.sha256(data).hexdigest()[:16], root=LEARN_ROOT)
+        except Exception:
+            pass
         return str(path)
     except Exception:
         return None
