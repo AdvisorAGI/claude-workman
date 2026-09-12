@@ -250,6 +250,47 @@ class TestPark:
         assert out["checks"]["pointer_parked"] is True and out["clean"] is True
 
 
+class TestPersistedLaunches:
+    """F5: a later process's hand_back closes only what the first one launched."""
+
+    def test_a_second_process_closes_windows_from_the_state_file(self, desk, monkeypatch):
+        ch = FakeChannel()
+        monkeypatch.setattr(handback, "_channel", lambda: ch)
+        monkeypatch.setattr(handback.time, "sleep", lambda s: desk.windows.clear())
+        handback.note_launch({"ok": True, "pid": 4242, "argv": ["zenity"],
+                              "window": {"id": "0x1"}}, before={"0x2"})
+        # New process: empty memory, same state file (WORKMAN_STATE_DIR).
+        handback._LAUNCHED.clear()
+        assert handback.launched()[0]["windows"] == ["0x1", "0x3"]
+        out = handback.close_launched(wait_s=1.0)
+        assert sorted(ch.closed) == [1, 3]
+        assert out["ok"] is True and handback.launched() == []
+
+    def test_stale_pid_with_a_new_starttime_is_dropped(self, desk, monkeypatch):
+        ch = FakeChannel()
+        monkeypatch.setattr(handback, "_channel", lambda: ch)
+        monkeypatch.setattr(handback, "_pid_starttime", lambda pid: 99)
+        handback.note_launch({"ok": True, "pid": 4242, "argv": ["xterm"],
+                              "window": {"id": "0x1"}}, before={"0x2"})
+        assert handback.launched()[0]["starttime"] == 99
+        monkeypatch.setattr(handback, "_pid_starttime", lambda pid: 100)
+        assert handback.launched() == []
+        out = handback.close_launched(wait_s=0.0)
+        assert ch.closed == [] and out["asked"] == []
+
+    def test_unreadable_state_is_unknown_and_not_clean(self, desk, monkeypatch, tmp_path):
+        path = tmp_path / "wm-state" / handback._LAUNCHED_FILE
+        path.parent.mkdir(parents=True, exist_ok=True)
+        path.write_text("{not json")
+        ch = FakeChannel()
+        monkeypatch.setattr(handback, "_channel", lambda: ch)
+        out = handback.hand_back()
+        assert out["launched"] == "unknown"
+        assert out["clean"] is False
+        assert ch.closed == []
+        assert desk.windows  # owner's windows untouched
+
+
 class TestHandBack:
     def test_clean_when_everything_checks_out(self, desk, monkeypatch):
         ch = FakeChannel(held={"keys": [50], "buttons": []})

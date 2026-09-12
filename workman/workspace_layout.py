@@ -83,6 +83,10 @@ _WRITE_BEAT_S = 0.15
 #: geometry writes are ignored until that finishes.
 _UNFULLSCREEN_S = 1.0
 
+#: GTK often maps a 1x1 client-leader at (0,0) before the real dialog is
+#: viewable. A window smaller than this is not a typing target.
+MIN_MAPPED_SIDE = 20
+
 
 # ---- failure as data -------------------------------------------------------
 def _backend_label() -> str:
@@ -151,6 +155,28 @@ def _brief(win: dict) -> dict:
             **_box(win)}
 
 
+def _usable_window(win: dict | None) -> bool:
+    """Mapped, viewable, large enough to be a real typing target."""
+    if not win:
+        return False
+    if win.get("mapped") is False or win.get("viewable") is False:
+        return False
+    if win.get("minimized"):
+        return False
+    box = _box(win)
+    return box["w"] >= MIN_MAPPED_SIDE and box["h"] >= MIN_MAPPED_SIDE
+
+
+def _prefer_usable(matches: list[dict]) -> dict | None:
+    """The largest mapped match, else the first record (still mapping)."""
+    if not matches:
+        return None
+    usable = [w for w in matches if _usable_window(w)]
+    if usable:
+        return max(usable, key=lambda w: _box(w)["w"] * _box(w)["h"])
+    return matches[0]
+
+
 def _find_window(query: str, listing: list[dict] | None = None) -> dict | None:
     """Resolve a window by exact id/pid first, then by name or app substring.
 
@@ -158,21 +184,28 @@ def _find_window(query: str, listing: list[dict] | None = None) -> dict | None:
     the digits of another window's id would otherwise shadow it. The backends do
     not agree on this ordering among themselves, so the ordering is settled here
     and the resolved id is what gets handed back down to them.
+
+    When several windows match a substring (a GTK 1x1 client-leader plus the
+    real dialog), the mapped one with real geometry wins.
     """
     windows = _windows() if listing is None else listing
     query = str(query or "")
-    for win in windows:
-        if query and (win.get("id") == query or win.get("pid") == query):
-            return win
+    exact = [win for win in windows
+             if query and (win.get("id") == query or win.get("pid") == query
+                           or str(win.get("id") or "") == query
+                           or str(win.get("pid") or "") == query)]
+    if exact:
+        return _prefer_usable(exact)
     needle = query.lower()
     if not needle:
         return None
+    hits = []
     for win in windows:
         if (needle in (win.get("name") or "").lower()
                 or needle in (win.get("app") or "").lower()
                 or needle in (win.get("title") or "").lower()):
-            return win
-    return None
+            hits.append(win)
+    return _prefer_usable(hits)
 
 
 def _relocate(win: dict, listing: list[dict] | None = None) -> dict | None:
@@ -726,10 +759,13 @@ def _raise_window(win: dict) -> dict:
 
 def _frontmost_verdict(win: dict) -> dict:
     """Is `win` the window a keystroke would reach right now, and how do we know?"""
+    if not _usable_window(win):
+        return {"verified": False, "matched_on": "", "active": None,
+                "reason": "not_mapped"}
     active = desktop.active_window()
     if not active.get("ok"):
         return {"verified": False, "matched_on": "", "active": active}
-    if active.get("id") and active.get("id") == win.get("id"):
+    if active.get("id") and str(active.get("id")) == str(win.get("id")):
         return {"verified": True, "matched_on": "id", "active": active}
     api = _ax_api()
     if api is not None and active.get("pid") == win.get("pid"):
@@ -1387,36 +1423,49 @@ def focus_and_verify(query: str, timeout_s: float = 6.0) -> dict:
     specific window could not be distinguished.
     """
     started = time.monotonic()
-    win = _find_window(query)
-    if win is None:
-        return {"ok": False, "verified": False, "waited_ms": 0,
-                "window": None, "app": None,
-                "error": f"no window matching {query!r}",
-                "windows": _known_windows()}
-    raised = _raise_window(win)
     deadline = started + max(0.0, float(timeout_s))
-    verdict = {"verified": False, "matched_on": "", "active": None}
+    win = None
+    raised: dict = {}
+    verdict: dict = {"verified": False, "matched_on": "", "active": None}
     while True:
-        verdict = _frontmost_verdict(win)
-        if verdict["verified"] or time.monotonic() >= deadline:
+        found = _find_window(query)
+        if found is not None:
+            win = found
+            if _usable_window(win):
+                raised = _raise_window(win)
+                verdict = _frontmost_verdict(win)
+                if verdict["verified"]:
+                    break
+        if time.monotonic() >= deadline:
             break
         time.sleep(_POLL_S)
     waited_ms = int(round((time.monotonic() - started) * 1000))
+    if win is None:
+        return {"ok": False, "verified": False, "waited_ms": waited_ms,
+                "window": None, "app": None,
+                "error": f"no window matching {query!r}",
+                "windows": _known_windows()}
     out = {
         "ok": bool(verdict["verified"]),
         "verified": bool(verdict["verified"]),
         "window": _brief(_relocate(win) or win),
         "app": win.get("app") or win.get("name") or "",
         "waited_ms": waited_ms,
-        "matched_on": verdict["matched_on"],
+        "matched_on": verdict.get("matched_on") or "",
         "raise_sent": bool(raised.get("ok")),
     }
     if not verdict["verified"]:
-        out["error"] = (f"{query!r} did not come forward within {timeout_s}s")
+        if not _usable_window(_relocate(win) or win):
+            out["error"] = (f"{query!r} did not map a viewable window "
+                            f"within {timeout_s}s")
+            out["hint"] = ("the window was still 1x1 or unmapped; wait for it "
+                           "to finish mapping before typing")
+        else:
+            out["error"] = (f"{query!r} did not come forward within {timeout_s}s")
+            out["hint"] = ("some window managers refuse programmatic activation; "
+                           "screenshot before typing, and on macOS check the "
+                           "Accessibility grant")
         out["frontmost"] = verdict.get("active")
-        out["hint"] = ("some window managers refuse programmatic activation; "
-                       "screenshot before typing, and on macOS check the "
-                       "Accessibility grant")
     return out
 
 

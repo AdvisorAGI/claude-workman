@@ -16,7 +16,7 @@ from __future__ import annotations
 import shutil
 import time
 
-from . import owner_pause
+from . import owner_pause, shell_guard
 from .platform import active, backend_name, load
 from .platform import base
 
@@ -250,6 +250,9 @@ def _safe(name: str, *args, **kwargs) -> dict:
                 return refused
         else:
             _VIEWER_SEEN["at"] = -1.0  # a window change: the next move reads afresh
+        if name in owner_pause.KEYBOARD_ACTIONS:
+            if (refused := shell_guard.refusal(name)) is not None:
+                return refused
     module = active()
     # Name the backend that was actually asked, not the one this host would
     # pick: they differ whenever a backend is loaded explicitly for inspection.

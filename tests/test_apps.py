@@ -95,6 +95,25 @@ class TestLaunchGuards:
         assert captured["argv"] == ["xterm", "-e", "htop"]
         assert captured["kwargs"]["start_new_session"] is True
 
+    def test_wait_for_window_skips_a_1x1_leader(self, monkeypatch):
+        monkeypatch.delenv("WORKMAN_ALLOW_LAUNCH", raising=False)
+        monkeypatch.setattr(apps.shutil, "which", lambda binary: "/usr/bin/zenity")
+        frames = [
+            [{"id": "0x1", "name": "workman-typing-check", "w": 1, "h": 1}],
+            [{"id": "0x1", "name": "workman-typing-check", "w": 1, "h": 1},
+             {"id": "0x2", "name": "workman-typing-check", "w": 360, "h": 140}],
+        ]
+        monkeypatch.setattr(apps.desktop, "list_windows",
+                            lambda: list(frames[0]))
+        monkeypatch.setattr(apps.time, "sleep",
+                            lambda s: frames.pop(0) if len(frames) > 1 else None)
+        monkeypatch.setattr(apps.subprocess, "Popen",
+                            lambda argv, **k: type("P", (), {"pid": 77}))
+        result = apps.launch("zenity --entry", wait_for_window=2)
+        assert result["ok"] is True
+        assert result["window"]["id"] == "0x2"
+        assert int(result["window"]["w"]) >= 20
+
     def test_explicit_args_are_not_word_split(self, monkeypatch):
         monkeypatch.delenv("WORKMAN_ALLOW_LAUNCH", raising=False)
         monkeypatch.setattr(apps.shutil, "which", lambda binary: "/usr/bin/app")

@@ -1,5 +1,16 @@
 # Handoff: workman human mode, owner priority, hand-back, remote (2026-09-12)
 
+## L2 verify+fix (2026-09-12, grok-4.6 xhigh)
+
+Live L2 on :0 typed into GNOME overview search. Fixes in-tree, not committed.
+
+- F1: ASCII `type_text("workman ok")` does not emit Super_L. Scratch remap now skips modifier-map keycodes (mod4 NoSymbol Super_L). Overview origin of that run is unproven in code.
+- F2: `type_text` / `press_key` / `key_down` refuse with `error: shell_has_focus` when OverviewActive or AT-SPI focus is gnome-shell. Missing D-Bus / non-GNOME degrades.
+- F3: `focus_and_verify` waits for a mapped window ≥20px; 1x1 at 0,0 is not `verified`.
+- F4: `focused_element` / AT-SPI tree return an error dict when `gi` is missing.
+- F5: launches persist under `$WORKMAN_STATE_DIR` or `~/.local/state/workman/launched.json` for cross-process `hand_back`.
+
+
 Owner order: stop spending Fable. Tree left consistent; nothing committed (owner rule).
 Suite: `cd ~/workman && .venv/bin/python -m pytest tests -q -p no:cacheprovider` -> **591 passed, 0 failed** (5.63 s; 2026-09-12 after grok-4.6 verifier/fixer completed finding 7). Was 575 after Opus, 506 before findings 1-7.
 Uncommitted files: 41 (`git status --short`); the `?? ops/`, `?? workman/{account,cu_memory,cu_skills,episode,learned_shortcuts,memory_graph,shortcuts,working,workspace_layout}.py`, `?? tests/test_{episode,memory,stability}.py` entries are ANOTHER session's work, untouched except `tests/test_stability.py:96` (fake `type_text` gained `dwell_ms=0`).

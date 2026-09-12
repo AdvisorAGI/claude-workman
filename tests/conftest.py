@@ -20,7 +20,7 @@ import subprocess
 
 import pytest
 
-from workman import apps, chrome, desktop, handback, owner_pause, resume, x11, xtest
+from workman import apps, chrome, desktop, handback, owner_pause, resume, shell_guard, x11, xtest
 from workman.platform import ax_darwin, darwin
 
 
@@ -32,8 +32,13 @@ def _blocked_run(cmd, timeout=20, input_text=None, **_kw):
 @pytest.fixture(autouse=True)
 def _no_live_desktop(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKMAN_XTEST", "0")
+    monkeypatch.setenv("WORKMAN_STATE_DIR", str(tmp_path / "wm-state"))
     monkeypatch.setattr(x11, "_xt", lambda: None)
     monkeypatch.setattr(x11, "_run", _blocked_run)
+    monkeypatch.setattr(shell_guard, "_probe_overview", lambda: None)
+    monkeypatch.setattr(shell_guard, "_probe_atspi_shell", lambda: None)
+    monkeypatch.setattr(shell_guard, "_probe_x_active", lambda: None)
+    shell_guard.reset()
     x11._LAST_PLACED["at"] = None
     # Never talk to :0: the xdotool fallback of the viewer guard would otherwise
     # spawn getactivewindow against the live display.

@@ -112,15 +112,39 @@ def launch(command: str, args: list[str] | None = None, wait_for_window: float =
     result = {"ok": True, "pid": proc.pid, "argv": argv}
     if wait_for_window > 0:
         deadline = time.monotonic() + wait_for_window
+        last_new: list[dict] = []
         while time.monotonic() < deadline:
             new = [w for w in desktop.list_windows() if w["id"] not in before]
-            if new:
-                result["window"] = new[0]
+            last_new = new
+            ready = [w for w in new if _window_ready(w)]
+            if ready:
+                result["window"] = max(
+                    ready, key=lambda w: _window_area(w))
                 return result
             time.sleep(0.3)
-        result["window"] = None
+        result["window"] = last_new[0] if last_new else None
         result["note"] = f"no new window within {wait_for_window}s — it may still be starting"
     return result
+
+
+#: GTK maps a 1x1 client-leader at (0,0) before the real dialog is viewable.
+_MIN_MAPPED_SIDE = 20
+
+
+def _window_area(win: dict) -> int:
+    try:
+        return max(0, int(win.get("w") or 0)) * max(0, int(win.get("h") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _window_ready(win: dict) -> bool:
+    """True when a newly mapped window is large enough to type into."""
+    try:
+        w, h = int(win.get("w") or 0), int(win.get("h") or 0)
+    except (TypeError, ValueError):
+        return False
+    return w >= _MIN_MAPPED_SIDE and h >= _MIN_MAPPED_SIDE
 
 
 def list_apps() -> list[dict]:

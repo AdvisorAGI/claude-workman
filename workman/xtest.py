@@ -157,6 +157,11 @@ class XIDeviceInfo(ctypes.Structure):
                 ("classes", ctypes.c_void_p)]
 
 
+class XModifierKeymap(ctypes.Structure):
+    _fields_ = [("max_keypermod", ctypes.c_int),
+                ("modifiermap", ctypes.POINTER(ctypes.c_ubyte))]
+
+
 class XDeviceState(ctypes.Structure):
     _fields_ = [("device_id", ctypes.c_ulong), ("num_classes", ctypes.c_int),
                 ("data", ctypes.c_void_p)]
@@ -243,6 +248,7 @@ class Channel:
         self._keymap: dict[int, tuple[int, int]] | None = None
         self._scratch: dict[int, int] = {}      # keysym -> scratch keycode
         self._scratch_free: list[int] = []
+        self._scratch_banned: set[int] = set()
         self._min_kc = ctypes.c_int(); self._max_kc = ctypes.c_int()
         self.x11.XDisplayKeycodes(self.dpy, self._min_kc, self._max_kc)
         self._xi_opcode: int | None = None
@@ -269,6 +275,10 @@ class Channel:
         x.XGetKeyboardMapping.argtypes = [vp, ctypes.c_ubyte, ci, P(ci)]
         x.XGetKeyboardMapping.restype = P(cul)
         x.XChangeKeyboardMapping.argtypes = [vp, ci, ci, P(cul), ci]
+        x.XGetModifierMapping.argtypes = [vp]
+        x.XGetModifierMapping.restype = P(XModifierKeymap)
+        if hasattr(x, "XFreeModifiermap"):
+            x.XFreeModifiermap.argtypes = [P(XModifierKeymap)]
         x.XFree.argtypes = [vp]
         x.XQueryKeymap.argtypes = [vp, ctypes.POINTER(ctypes.c_char)]
         x.XGetImage.argtypes = [vp, cul, ci, ci, cu, cu, cul, ci]
@@ -499,9 +509,38 @@ class Channel:
                             table[upper] = (lo + i, 1)
         finally:
             self.x11.XFree(syms)
-        # Scratch keycodes: the top of the range, away from real keys.
-        self._scratch_free = sorted(free, reverse=True)[:8]
+        # Scratch keycodes: the top of the range, away from real keys, and
+        # never a modifier-map slot. GNOME's overlay-key is Super_L; Mutter
+        # also parks Super_L on empty keycodes in mod4 (e.g. 206). Remapping
+        # one of those and tapping it is a Super press+release, which toggles
+        # the Activities overview.
+        self._scratch_banned = self._modifier_keycodes()
+        self._scratch_free = [c for c in sorted(free, reverse=True)
+                              if c not in self._scratch_banned][:8]
         return table
+
+    def _modifier_keycodes(self) -> set[int]:
+        """Every keycode currently in the 8-modifier map (Shift..Mod5)."""
+        get = getattr(self.x11, "XGetModifierMapping", None)
+        if get is None:
+            return set()
+        try:
+            p = get(self.dpy)
+            if not p:
+                return set()
+            mm = p.contents
+            n = int(mm.max_keypermod or 0)
+            out: set[int] = set()
+            for i in range(8 * n):
+                code = int(mm.modifiermap[i])
+                if code:
+                    out.add(code)
+            free_mm = getattr(self.x11, "XFreeModifiermap", None)
+            if free_mm is not None:
+                free_mm(p)
+            return out
+        except Exception:
+            return set()
 
     def keymap(self) -> dict[int, tuple[int, int]]:
         if self._keymap is None:
@@ -529,14 +568,19 @@ class Channel:
             return code
         if not self._scratch_free:
             self.keymap()
-        if not self._scratch_free:
+        banned = self._scratch_banned or set()
+        candidates = [c for c in self._scratch_free if c not in banned]
+        if not candidates:
             raise ChannelError("no free keycode to type " + hex(sym))
-        # Reuse the oldest scratch slot when all are taken.
-        if len(self._scratch) >= len(self._scratch_free):
+        used = set(self._scratch.values())
+        fresh = [c for c in candidates if c not in used]
+        if fresh:
+            code = fresh[0]
+        else:
             old_sym = next(iter(self._scratch))
             code = self._scratch.pop(old_sym)
-        else:
-            code = self._scratch_free[len(self._scratch)]
+            if code in banned:
+                raise ChannelError("no free keycode to type " + hex(sym))
         arr = (ctypes.c_ulong * 2)(sym, sym)
         self.x11.XChangeKeyboardMapping(self.dpy, code, 2, arr, 1)
         self.x11.XSync(self.dpy, 0)

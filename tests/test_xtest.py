@@ -17,9 +17,11 @@ from workman import xtest
 
 XK = {"a": 0x61, "A": 0x41, "b": 0x62, "h": 0x68, "H": 0x48, "i": 0x69, "Shift_L": 0xFFE1,
       "Control_L": 0xFFE3, "Return": 0xFF0D, "Escape": 0xFF1B, "t": 0x74, "space": 0x20,
-      "eacute": 0xE9}
+      "eacute": 0xE9, "w": 0x77, "o": 0x6F, "r": 0x72, "k": 0x6B, "m": 0x6D, "n": 0x6E,
+      "Super_L": 0xFFEB, "Super_R": 0xFFEC, "Hyper_L": 0xFFED}
 KEYCODE = {0x61: 38, 0x62: 56, 0x68: 43, 0x69: 31, 0xFFE1: 50, 0xFFE3: 37, 0xFF0D: 36,
-           0xFF1B: 9, 0x74: 28, 0x20: 65}
+           0xFF1B: 9, 0x74: 28, 0x20: 65, 0x77: 25, 0x6F: 32, 0x72: 27, 0x6B: 45,
+           0x6D: 58, 0x6E: 57, 0xFFEB: 133, 0xFFEC: 134, 0xFFED: 207}
 
 
 class FakeX11:
@@ -81,6 +83,7 @@ def make_channel() -> xtest.Channel:
     ch._keymap[0x48] = (43, 1)
     ch._scratch = {}
     ch._scratch_free = [250, 251]
+    ch._scratch_banned = set()
     ch._xi_opcode = None
     ch._raw_selected = False
     return ch
@@ -158,6 +161,33 @@ class TestTyping:
         assert ch.needs_remap(0) is False
 
     def test_unmapped_symbol_uses_a_scratch_keycode(self, ch):
+        ch.type_text("é")
+        assert ch.x11.remapped[0] == 250
+        assert ch.xtst.events == [("key", 250, True), ("key", 250, False)]
+
+    def test_workman_ok_does_not_emit_super_or_a_bare_modifier(self, ch):
+        """L2 regression: ASCII 'workman ok' must not tap Super_L (overview)."""
+        n = ch.type_text("workman ok")
+        assert n == 10
+        overlay = {133, 134, 207}  # Super_L, Super_R, Hyper_L
+        keys = [e for e in ch.xtst.events if e[0] == "key"]
+        assert all(code not in overlay for _, code, _ in keys)
+        # Every press is released; no modifier is held without a base key.
+        held = []
+        for _, code, down in keys:
+            if down:
+                held.append(code)
+            else:
+                assert held and held[-1] == code
+                held.pop()
+        assert held == []
+        # Shift (50) is a modifier; this string is all level-0, so unused.
+        assert 50 not in [code for _, code, _ in keys]
+
+    def test_scratch_skips_modifier_mapped_empty_keycodes(self, ch):
+        """Empty keycodes in mod4 (NoSymbol Super_L) must never be remapped."""
+        ch._scratch_free = [206, 250]
+        ch._scratch_banned = {206}
         ch.type_text("é")
         assert ch.x11.remapped[0] == 250
         assert ch.xtst.events == [("key", 250, True), ("key", 250, False)]

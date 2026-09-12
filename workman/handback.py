@@ -12,10 +12,17 @@ agent never pressed (the owner may be physically holding it).
 """
 from __future__ import annotations
 
+import json
 import os
+import tempfile
 import time
 
 from . import desktop, human, owner_pause
+
+try:
+    import fcntl
+except ImportError:  # pragma: no cover - Windows
+    fcntl = None
 
 #: Programs this server started (launch_app), with the window seen at launch.
 _LAUNCHED: list[dict] = []
@@ -26,6 +33,154 @@ _POINTER_BEFORE: dict = {"at": None}
 
 CLOSE_WAIT_S = 3.0
 PARK_MARGIN_PX = 24
+
+#: Persist launches so a later process's hand_back can close them.
+STATE_ENV = "WORKMAN_STATE_DIR"
+_LAUNCHED_FILE = "launched.json"
+_UNREADABLE = object()
+_STATE = {"unknown": False}
+
+
+# ---- persisted launch tracking -------------------------------------------------------
+def _state_dir() -> str:
+    override = (os.environ.get(STATE_ENV) or "").strip()
+    if override:
+        return override
+    return os.path.join(os.path.expanduser("~"), ".local", "state", "workman")
+
+
+def _state_path() -> str:
+    return os.path.join(_state_dir(), _LAUNCHED_FILE)
+
+
+def _pid_starttime(pid: int) -> int | None:
+    """Field 22 of /proc/<pid>/stat, or None when /proc is missing."""
+    try:
+        with open(f"/proc/{int(pid)}/stat", "rb") as fh:
+            stat = fh.read().decode(errors="replace")
+        rest = stat.rsplit(")", 1)[1].split()
+        return int(rest[19])
+    except (OSError, ValueError, IndexError, TypeError):
+        return None
+
+
+def _entry_live(entry: dict) -> bool:
+    """Drop entries whose pid is gone or whose starttime no longer matches."""
+    if not isinstance(entry, dict):
+        return False
+    try:
+        pid = int(entry.get("pid"))
+    except (TypeError, ValueError):
+        return False
+    stored = entry.get("starttime")
+    if stored is None:
+        # Recorded without /proc (macOS, tests with fake pids): keep.
+        return True
+    now = _pid_starttime(pid)
+    if now is None:
+        return False
+    try:
+        return int(now) == int(stored)
+    except (TypeError, ValueError):
+        return False
+
+
+def _lock_fd():
+    if fcntl is None:
+        return None
+    path = _state_path() + ".lock"
+    os.makedirs(os.path.dirname(path), mode=0o700, exist_ok=True)
+    fd = os.open(path, os.O_CREAT | os.O_RDWR, 0o600)
+    fcntl.flock(fd, fcntl.LOCK_EX)
+    return fd
+
+
+def _unlock_fd(fd) -> None:
+    if fd is None:
+        return
+    try:
+        if fcntl is not None:
+            fcntl.flock(fd, fcntl.LOCK_UN)
+    finally:
+        os.close(fd)
+
+
+def _read_unlocked():
+    """List of entries, [] if missing, _UNREADABLE if corrupt."""
+    path = _state_path()
+    if not os.path.exists(path):
+        return []
+    try:
+        with open(path, "r", encoding="utf-8") as fh:
+            data = json.load(fh)
+    except (OSError, json.JSONDecodeError, UnicodeDecodeError, ValueError):
+        return _UNREADABLE
+    if isinstance(data, dict):
+        entries = data.get("entries")
+    else:
+        entries = data
+    if not isinstance(entries, list):
+        return _UNREADABLE
+    return [e for e in entries if isinstance(e, dict)]
+
+
+def _write_unlocked(entries: list[dict]) -> None:
+    directory = _state_dir()
+    os.makedirs(directory, mode=0o700, exist_ok=True)
+    try:
+        os.chmod(directory, 0o700)
+    except OSError:
+        pass
+    fd, tmp = tempfile.mkstemp(dir=directory, prefix=".launched.")
+    try:
+        os.fchmod(fd, 0o600)
+        with os.fdopen(fd, "w", encoding="utf-8") as fh:
+            json.dump({"version": 1, "entries": entries}, fh)
+            fh.flush()
+            os.fsync(fh.fileno())
+        os.replace(tmp, _state_path())
+    except Exception:
+        try:
+            os.unlink(tmp)
+        except OSError:
+            pass
+        raise
+
+
+def _load_entries():
+    """Live entries from disk (and memory if the file is missing).
+
+    Returns _UNREADABLE when the file exists but cannot be parsed.
+    """
+    fd = None
+    try:
+        fd = _lock_fd()
+        loaded = _read_unlocked()
+    except OSError:
+        _STATE["unknown"] = True
+        return _UNREADABLE
+    finally:
+        _unlock_fd(fd)
+    if loaded is _UNREADABLE:
+        _STATE["unknown"] = True
+        return _UNREADABLE
+    _STATE["unknown"] = False
+    live = [e for e in loaded if _entry_live(e)]
+    _LAUNCHED[:] = live
+    return live
+
+
+def _persist_entries(entries: list[dict]) -> None:
+    fd = None
+    try:
+        fd = _lock_fd()
+        _write_unlocked(entries)
+        _LAUNCHED[:] = list(entries)
+        _STATE["unknown"] = False
+    except OSError:
+        _LAUNCHED[:] = list(entries)
+    finally:
+        _unlock_fd(fd)
 
 
 # ---- bookkeeping (cheap, called from the MCP tools) -----------------------------------
@@ -70,8 +225,16 @@ def note_launch(result: dict, before: set[str] | None = None) -> None:
         is_new = wid not in before if before is not None else wid == str(reported)
         if is_new and _pid_of(win) in tree and wid not in new:
             new.append(wid)
-    _LAUNCHED.append({"pid": pid, "argv": result.get("argv"), "window": reported,
-                      "windows": new, "at": time.time()})
+    entry = {"pid": pid, "starttime": _pid_starttime(pid),
+             "argv": result.get("argv"), "window": reported,
+             "windows": new, "at": time.time()}
+    loaded = _load_entries()
+    if loaded is _UNREADABLE:
+        # Do not clobber a corrupt file; this process still tracks in memory.
+        _LAUNCHED.append(entry)
+        return
+    loaded.append(entry)
+    _persist_entries(loaded)
 
 
 def note_key(key: str, down: bool) -> None:
@@ -108,7 +271,10 @@ def note_pointer_before() -> None:
 
 
 def launched() -> list[dict]:
-    return list(_LAUNCHED)
+    loaded = _load_entries()
+    if loaded is _UNREADABLE:
+        return list(_LAUNCHED)
+    return list(loaded)
 
 
 def held() -> dict:
@@ -120,6 +286,11 @@ def reset() -> None:
     _HELD["keys"].clear()
     _HELD["buttons"].clear()
     _POINTER_BEFORE["at"] = None
+    _STATE["unknown"] = False
+    try:
+        _persist_entries([])
+    except OSError:
+        pass
 
 
 # ---- the channel, when there is one --------------------------------------------------
@@ -237,7 +408,10 @@ def _descendants(pid: int) -> set[int]:
 def _our_windows() -> list[dict]:
     """The still-open windows among those recorded at launch time. No pid
     walk here: a pid tree read now would include the owner's later windows."""
-    ids = {wid for entry in _LAUNCHED for wid in entry.get("windows") or ()}
+    loaded = _load_entries()
+    if loaded is _UNREADABLE:
+        return []
+    ids = {wid for entry in loaded for wid in entry.get("windows") or ()}
     if not ids:
         return []
     return [win for win in desktop.list_windows() if str(win.get("id")) in ids]
@@ -246,11 +420,15 @@ def _our_windows() -> list[dict]:
 def close_launched(wait_s: float = CLOSE_WAIT_S) -> dict:
     """Ask every window the agent opened to close (WM_DELETE_WINDOW, so an
     app with unsaved work gets to prompt), then wait for them to go."""
+    loaded = _load_entries()
+    if loaded is _UNREADABLE:
+        return {"ok": False, "asked": [], "closed": [], "still_open": [],
+                "launched": "unknown"}
     targets = _our_windows()
     out: dict = {"ok": True, "asked": [], "closed": [], "still_open": [],
-                 "launched": launched()}
+                 "launched": list(loaded)}
     if not targets:
-        _LAUNCHED.clear()
+        _persist_entries([])
         return out
     ch = _channel()
     for win in targets:
@@ -277,7 +455,15 @@ def close_launched(wait_s: float = CLOSE_WAIT_S) -> dict:
             out["still_open"].append({"id": str(win["id"]), "name": win.get("name"),
                                       "note": "did not close; it may be asking about unsaved work"})
     if not remaining and not out["still_open"]:
-        _LAUNCHED.clear()
+        _persist_entries([])
+    else:
+        still = {str(wid) for wid in remaining}
+        kept = []
+        for entry in loaded:
+            wins = [wid for wid in (entry.get("windows") or ()) if str(wid) in still]
+            if wins:
+                kept.append({**entry, "windows": wins})
+        _persist_entries(kept)
     out["ok"] = not remaining and not out["still_open"]
     return out
 
@@ -355,8 +541,16 @@ def hand_back(close_launched_windows: bool = True, park: bool = True) -> dict:
     """Everything above, in order, then the checklist a person would run
     before walking away. `clean` is True only when every check passed."""
     out: dict = {"released": release_all()}
-    if close_launched_windows:
+    tracked = _load_entries()
+    if tracked is _UNREADABLE:
+        out["launched"] = "unknown"
+        if close_launched_windows:
+            out["closed"] = {"ok": False, "asked": [], "closed": [],
+                             "still_open": [], "launched": "unknown"}
+    elif close_launched_windows:
         out["closed"] = close_launched()
+        if out["closed"].get("launched") == "unknown":
+            out["launched"] = "unknown"
     if park:
         out["pointer"] = park_pointer()
     out["screen"] = wake_screen()
@@ -366,13 +560,16 @@ def hand_back(close_launched_windows: bool = True, park: bool = True) -> dict:
         "nothing_held_by_agent": not xt.get("keys") and not xt.get("buttons")
         and not out["verify"]["held_tracked"]["keys"]
         and not out["verify"]["held_tracked"]["buttons"],
-        "our_windows_closed": not out["verify"]["our_windows_open"] if close_launched_windows else True,
+        "our_windows_closed": (
+            False if out.get("launched") == "unknown"
+            else (not out["verify"]["our_windows_open"] if close_launched_windows else True)
+        ),
         "pointer_parked": (out["pointer"].get("parked") or out["pointer"].get("reason")
                            in ("owner_active", "remote_viewer_focused")) if park else True,
         "screen_on": out["screen"].get("on", True) is not False,
         "no_grab": True,  # this server never grabs; see owner_pause and esc_pause
     }
     out["checks"] = checks
-    out["clean"] = all(checks.values())
+    out["clean"] = all(checks.values()) and out.get("launched") != "unknown"
     out["ok"] = out["clean"]
     return out

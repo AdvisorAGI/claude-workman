@@ -12,9 +12,17 @@ process name — never `pkill -f orca`, which self-matches its own shell command
 from __future__ import annotations
 import os
 import subprocess
+import sys
 import time
 
 DISPLAY = os.environ.get("WORKMAN_DISPLAY") or os.environ.get("DISPLAY") or ":0"
+
+#: Appended (never prepended) so a venv package still wins over dist-packages.
+_SYSTEM_DIST = "/usr/lib/python3/dist-packages"
+
+
+class AtspiUnavailable(Exception):
+    """gi / Atspi typelib is missing. Public functions turn this into a dict."""
 
 
 def _env() -> dict:
@@ -50,11 +58,49 @@ def disable_web() -> dict:
     return {"ok": True}
 
 
+def _gi_unavailable(exc: BaseException | None = None) -> dict:
+    detail = f"{type(exc).__name__}: {exc}" if exc else ""
+    out = {
+        "ok": False,
+        "error": f"AT-SPI unavailable: gi not importable ({sys.executable})",
+    }
+    if detail:
+        out["detail"] = detail
+    return out
+
+
+def _load_gi():
+    """Import gi from the venv, or from system dist-packages without putting
+    that directory ahead of the venv."""
+    try:
+        import gi
+        if gi is None:
+            raise ImportError("gi not importable")
+        return gi
+    except ImportError:
+        pass
+    sys.modules.pop("gi", None)
+    if os.path.isdir(os.path.join(_SYSTEM_DIST, "gi")) and _SYSTEM_DIST not in sys.path:
+        sys.path.append(_SYSTEM_DIST)
+    try:
+        import gi
+    except ImportError as exc:
+        raise AtspiUnavailable("gi not importable") from exc
+    if gi is None:
+        raise AtspiUnavailable("gi not importable")
+    return gi
+
+
 def _atspi():
-    import gi
-    gi.require_version("Atspi", "2.0")
-    from gi.repository import Atspi  # noqa
-    return Atspi
+    try:
+        gi = _load_gi()
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi  # noqa
+        return Atspi
+    except AtspiUnavailable:
+        raise
+    except (ImportError, ModuleNotFoundError, ValueError, AttributeError) as exc:
+        raise AtspiUnavailable(str(exc)) from exc
 
 
 ACTIONABLE = {"push button", "button", "toggle button", "check box", "radio button",
@@ -63,7 +109,10 @@ ACTIONABLE = {"push button", "button", "toggle button", "check box", "radio butt
 
 def tree(app: str | None = None, actionable_only: bool = True, limit: int = 400) -> list[dict]:
     """Return elements as {app, role, name, x, y, w, h} with screen coords."""
-    Atspi = _atspi()
+    try:
+        Atspi = _atspi()
+    except AtspiUnavailable as exc:
+        return [_gi_unavailable(exc)]
     out: list[dict] = []
     desktop = Atspi.get_desktop(0)
     for i in range(desktop.get_child_count()):
@@ -222,7 +271,10 @@ def _describe(node, app_name: str = "") -> dict:
 
 def find_node(name: str, role: str | None = None, app: str | None = None):
     """Return the live Accessible for an element, not just its coordinates."""
-    Atspi = _atspi()
+    try:
+        Atspi = _atspi()
+    except AtspiUnavailable:
+        return None, None
     needle = (name or "").lower()
     hit = {}
 
@@ -366,7 +418,10 @@ def _type_into_browser_field(info: dict, value: str) -> dict:
 def focused_element() -> dict:
     """The element that currently has keyboard focus — the reliable way to check
     that a click actually landed before typing into it."""
-    Atspi = _atspi()
+    try:
+        Atspi = _atspi()
+    except AtspiUnavailable as exc:
+        return _gi_unavailable(exc)
     desktop = Atspi.get_desktop(0)
     found = {}
     for i in range(desktop.get_child_count()):
@@ -380,6 +435,16 @@ def focused_element() -> dict:
                 states = node.get_state_set()
                 if states and states.contains(Atspi.StateType.FOCUSED):
                     found["info"] = _describe(node, app_name)
+                    try:
+                        found["info"]["editable"] = bool(
+                            states.contains(Atspi.StateType.EDITABLE))
+                    except Exception:
+                        pass
+                    try:
+                        found["info"]["showing"] = bool(
+                            states.contains(Atspi.StateType.SHOWING))
+                    except Exception:
+                        pass
                     return True
             except Exception:
                 return False
