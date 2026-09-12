@@ -142,3 +142,131 @@ class TestScreenshotMetadata:
         meta, image = server.screenshot()
         assert image.data == b"raw-png"
         assert "Pillow" in meta["note"]
+
+
+class TestRemoteTools:
+    """server.remote / remote_screenshot / remote_status, with the module
+    the tool bodies look up (`server._remote`) replaced by a fake."""
+
+    @pytest.fixture
+    def remote_tools(self, monkeypatch):
+        from workman.remote import RemoteError
+
+        fake = _FakeRemoteModule(RemoteError)
+        monkeypatch.setattr(server, "_remote", fake)
+        return fake, server.remote, server.remote_screenshot, server.remote_status
+
+    def test_the_remote_tool_does_not_shadow_the_module(self):
+        import workman.remote
+
+        assert server._remote is workman.remote
+        assert callable(server.remote) and server.remote is not workman.remote
+
+    def test_remote_returns_error_dict_on_remote_error(self, remote_tools):
+        fake, remote_fn, _shot, _status = remote_tools
+        fake.call_impl = lambda *a, **k: (_ for _ in ()).throw(
+            fake.RemoteError("no channel"))
+        out = remote_fn("hostA", "ping")
+        assert out["ok"] is False
+        assert out["host"] == "hostA"
+        assert "RemoteError" in out["error"]
+        assert "no channel" in out["error"]
+
+    def test_remote_passes_verb_and_args(self, remote_tools):
+        fake, remote_fn, _shot, _status = remote_tools
+        out = remote_fn("hostA", "key", args=["shift"], timeout_s=12.5)
+        assert out == {"ok": True, "host": "hostA", "verb": "key"}
+        assert fake.calls == [("call", "hostA", "key", ["shift"], 12.5)]
+
+    def test_remote_screenshot_wraps_png_bytes_as_image(self, remote_tools):
+        from mcp.server.fastmcp import Image
+
+        fake, _remote, screenshot_fn, _status = remote_tools
+        png = b"\x89PNG\r\n\x1a\nfake"
+        meta = {"ok": True, "blank_check": "ok", "scale": 1.0}
+
+        def image(host, verb, args=None):
+            return dict(meta), png
+
+        fake.image_impl = image
+        out = screenshot_fn("hostA")
+        assert fake.calls == [("image", "hostA", "shot", ["-"])]
+        assert out[0] == meta
+        assert isinstance(out[1], Image)
+        assert out[1].data == png
+        assert out[1]._format == "png"
+
+    def test_remote_screenshot_full_asks_for_full(self, remote_tools):
+        fake, _remote, screenshot_fn, _status = remote_tools
+        screenshot_fn("hostA", full=True)
+        assert fake.calls == [("image", "hostA", "shot", ["-", "full"])]
+
+    def test_remote_screenshot_jpeg_when_bytes_are_not_png(self, remote_tools):
+        from mcp.server.fastmcp import Image
+
+        fake, _remote, screenshot_fn, _status = remote_tools
+        jpeg = b"\xff\xd8jpeg-bytes"
+        fake.image_impl = lambda host, verb, args=None: ({"ok": True}, jpeg)
+        out = screenshot_fn("hostA")
+        assert isinstance(out[1], Image)
+        assert out[1].data == jpeg
+        assert out[1]._format == "jpeg"
+
+    def test_remote_screenshot_meta_only_when_bytes_are_none(self, remote_tools):
+        fake, _remote, screenshot_fn, _status = remote_tools
+        meta = {"ok": True, "note": "no image"}
+        fake.image_impl = lambda host, verb, args=None: (meta, None)
+        out = screenshot_fn("hostA")
+        assert out == [meta]
+
+    def test_remote_screenshot_returns_error_list_on_remote_error(self, remote_tools):
+        fake, _remote, screenshot_fn, _status = remote_tools
+        fake.image_impl = lambda *a, **k: (_ for _ in ()).throw(
+            fake.RemoteError("relay down"))
+        out = screenshot_fn("hostA")
+        assert out == [{"ok": False, "error": "RemoteError: relay down", "host": "hostA"}]
+
+    def test_remote_status_ok_passthrough(self, remote_tools):
+        fake, _remote, _shot, status_fn = remote_tools
+        fake.status_impl = lambda host: {
+            "ok": True, "host": host, "transport": "direct cable"}
+        out = status_fn("hostA")
+        assert out == {"ok": True, "host": "hostA", "transport": "direct cable"}
+        assert fake.calls == [("status", "hostA")]
+
+    def test_remote_status_returns_error_dict_on_remote_error(self, remote_tools):
+        fake, _remote, _shot, status_fn = remote_tools
+        fake.status_impl = lambda host: (_ for _ in ()).throw(
+            fake.RemoteError("timed out"))
+        out = status_fn("hostA")
+        assert out["ok"] is False
+        assert out["host"] == "hostA"
+        assert "RemoteError" in out["error"]
+        assert "timed out" in out["error"]
+
+
+class _FakeRemoteModule:
+    def __init__(self, remote_error):
+        self.RemoteError = remote_error
+        self.calls: list[tuple] = []
+        self.call_impl = None
+        self.image_impl = None
+        self.status_impl = None
+
+    def call(self, host, verb, args, timeout=60.0):
+        self.calls.append(("call", host, verb, args, timeout))
+        if self.call_impl is not None:
+            return self.call_impl(host, verb, args, timeout)
+        return {"ok": True, "host": host, "verb": verb}
+
+    def image(self, host, verb, args=None):
+        self.calls.append(("image", host, verb, args))
+        if self.image_impl is not None:
+            return self.image_impl(host, verb, args)
+        return {"ok": True, "host": host}, None
+
+    def status(self, host):
+        self.calls.append(("status", host))
+        if self.status_impl is not None:
+            return self.status_impl(host)
+        return {"ok": True, "host": host}

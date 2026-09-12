@@ -1,0 +1,17 @@
+[Unit]
+Description=Workman owner pause: physical Escape pauses agent input, presence makes agents yield (listen-only, no grab)
+After=graphical-session.target
+PartOf=graphical-session.target
+
+[Service]
+Type=simple
+Environment=DISPLAY=:0
+Environment=XAUTHORITY=/run/user/1000/gdm/Xauthority
+Environment=WORKMAN_LEARN_ROOT=%h/.grok/workman-learn
+ExecStart=/home/monzurul/workman/.venv/bin/python -m workman.esc_pause --display :0
+Restart=always
+RestartSec=3
+Nice=5
+
+[Install]
+WantedBy=default.target

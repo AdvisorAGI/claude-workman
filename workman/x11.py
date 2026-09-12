@@ -26,6 +26,69 @@ def _run(cmd: list[str], timeout: int = 20, input_text: str | None = None) -> su
     return subprocess.run(cmd, env=_env(), capture_output=True, text=True, timeout=timeout, input=input_text)
 
 
+# ---- the persistent channel ------------------------------------------------
+# Every primitive below asks `_xt()` first. With a channel, an action is one X
+# request on an open connection; without one (no libXtst, WORKMAN_XTEST=0, the
+# test suite) it is the original xdotool/ffmpeg subprocess. Both paths stamp
+# the injection so the Escape listener can tell an agent's XTEST events from
+# the owner's KVM-relayed ones.
+
+def _xt():
+    """The XTest channel for DISPLAY, or None to use the subprocess path."""
+    from . import xtest
+    return xtest.channel(DISPLAY)
+
+
+def _stamp(escape: bool = False) -> None:
+    from . import owner_pause
+    owner_pause.mark_agent_input(escape=escape)
+
+
+def _is_escape(key: str) -> bool:
+    from . import xtest
+    names = xtest.parse_combo(key)
+    return bool(names) and names[-1] == "Escape"
+
+
+def keysym_for(ch: str) -> int:
+    from . import xtest
+    return xtest.keysym_for_char(ch)
+
+
+def input_channel() -> str:
+    """'xtest' when actions go over the persistent connection, else 'xdotool'."""
+    return "xtest" if _xt() is not None else "xdotool"
+
+
+# Where this process last put the pointer. Raw XInput2 events never see a
+# warp (the Deskflow KVM moves the owner's pointer with XWarpPointer), so the
+# one thing that does reveal him moving the mouse is the pointer not being
+# where the agent left it.
+_LAST_PLACED: dict = {"at": None}
+FOREIGN_MOTION_PX = 3
+
+
+def _placed(x: int, y: int) -> None:
+    _LAST_PLACED["at"] = (int(x), int(y))
+
+
+def foreign_pointer_motion(tolerance: int = FOREIGN_MOTION_PX) -> bool:
+    """True when the pointer moved since the agent last placed it: somebody
+    else has the mouse. Costs one XQueryPointer; nothing is polled."""
+    ch = _xt()
+    at = _LAST_PLACED["at"]
+    if ch is None or at is None:
+        return False
+    try:
+        p = ch.pointer_position()
+    except Exception:
+        return False
+    if abs(p["x"] - at[0]) > tolerance or abs(p["y"] - at[1]) > tolerance:
+        _LAST_PLACED["at"] = None
+        return True
+    return False
+
+
 def _require(binary: str) -> None:
     if shutil.which(binary) is None:
         raise RuntimeError(f"'{binary}' not found on PATH — install it (Workman needs xdotool + ffmpeg)")
@@ -49,6 +112,9 @@ def emit_cursor(kind: str, x: int, y: int) -> None:
 
 
 def screen_size() -> tuple[int, int]:
+    ch = _xt()
+    if ch is not None:
+        return ch.screen_size()
     _require("xdotool")
     out = _run(["xdotool", "getdisplaygeometry"]).stdout.split()
     return (int(out[0]), int(out[1])) if len(out) == 2 else (1920, 1080)
@@ -57,6 +123,12 @@ def screen_size() -> tuple[int, int]:
 def screenshot(max_dim: int | None = None, region: tuple[int, int, int, int] | None = None) -> bytes:
     """Grab the display as PNG bytes. region=(x,y,w,h) captures a sub-rect.
     max_dim downscales so no side exceeds it (needs Pillow; ignored if absent)."""
+    ch = _xt()
+    if ch is not None:
+        try:
+            return ch.screenshot(region=region, max_dim=max_dim)
+        except Exception:
+            pass  # fall through to ffmpeg for this one frame
     _require("ffmpeg")
     w, h = screen_size()
     vinput = DISPLAY
@@ -132,20 +204,46 @@ def focus_window(query: str, minimize_blockers: bool = True) -> dict:
 
 
 def click(x: int, y: int, button: int = 1, count: int = 1) -> dict:
-    _require("xdotool")
     emit_cursor("click", x, y)
+    _stamp()
+    _placed(x, y)
+    ch = _xt()
+    if ch is not None:
+        ch.click(x, y, button=button, count=count)
+        return {"ok": True, "clicked": [x, y], "button": button, "count": count, "via": "xtest"}
+    _require("xdotool")
     _run(["xdotool", "mousemove", str(x), str(y), "click", "--repeat", str(count), str(button)])
     return {"ok": True, "clicked": [x, y], "button": button, "count": count}
 
 
 def move(x: int, y: int) -> dict:
     emit_cursor("move", x, y)
+    _stamp()
+    _placed(x, y)
+    ch = _xt()
+    if ch is not None:
+        ch.move(x, y)
+        return {"ok": True, "at": [x, y], "via": "xtest"}
     _run(["xdotool", "mousemove", str(x), str(y)])
     return {"ok": True, "at": [x, y]}
 
 
 def drag(from_x: int, from_y: int, to_x: int, to_y: int) -> dict:
     emit_cursor("move", from_x, from_y)
+    _stamp()
+    _placed(to_x, to_y)
+    ch = _xt()
+    if ch is not None:
+        ch.move(from_x, from_y)
+        ch.button(1, True)
+        try:
+            time.sleep(0.08)
+            ch.move(to_x, to_y)
+            time.sleep(0.08)
+        finally:
+            ch.button(1, False)
+        emit_cursor("click", to_x, to_y)
+        return {"ok": True, "from": [from_x, from_y], "to": [to_x, to_y], "via": "xtest"}
     _run(["xdotool", "mousemove", str(from_x), str(from_y)])
     _run(["xdotool", "mousedown", "1"])
     try:
@@ -162,11 +260,107 @@ def scroll(direction: str, amount: int = 3) -> dict:
     button = {"up": 4, "down": 5, "left": 6, "right": 7}.get(direction)
     if not button:
         return {"ok": False, "error": "direction must be up|down|left|right"}
+    _stamp()
+    ch = _xt()
+    if ch is not None:
+        ch.click(None, None, button=button, count=amount, gap_ms=0)
+        return {"ok": True, "scrolled": direction, "amount": amount, "via": "xtest"}
     _run(["xdotool", "click", "--repeat", str(amount), str(button)])
     return {"ok": True, "scrolled": direction, "amount": amount}
 
 
-def type_text(text: str, delay_ms: int = 40) -> dict:
+BROWSER_CLASSES = ("chrome", "chromium", "firefox", "brave", "vivaldi", "opera",
+                   "edge", "electron", "claude", "code", "slack", "discord")
+
+
+def active_window_is_browser() -> bool:
+    """Chrome, Chromium, Firefox or an Electron app has focus. Cheap: three
+    property reads on the open connection; False when nothing can be told."""
+    ch = _xt()
+    if ch is None:
+        return False
+    try:
+        info = ch.active_window_info()
+    except Exception:
+        return False
+    if not info.get("ok"):
+        return False
+    haystack = f"{info.get('class', '')} {info.get('instance', '')}".lower()
+    return any(b in haystack for b in BROWSER_CLASSES)
+
+
+#: After pasting an off-layout character, wait then put the owner's clipboard
+#: back. A page's paste handler reads the clipboard asynchronously.
+PASTE_RESTORE_S = 0.3
+
+
+def _clipboard_snapshot() -> dict | None:
+    """Current clipboard, or None when it cannot be read."""
+    from .platform import linux_x11
+    try:
+        snap = linux_x11.clipboard_get()
+    except Exception:
+        return None
+    return snap if isinstance(snap, dict) else None
+
+
+def _clipboard_restore(snap: dict | None) -> None:
+    if not snap or not snap.get("ok"):
+        return
+    time.sleep(PASTE_RESTORE_S)
+    from .platform import linux_x11
+    try:
+        linux_x11.clipboard_set(text=snap.get("text") or "")
+    except Exception:
+        pass
+
+
+def _paste(text: str) -> dict:
+    """The way a person enters a character that is not on the keyboard."""
+    from .platform import linux_x11
+    setres = linux_x11.clipboard_set(text=text)
+    if not setres.get("ok"):
+        return setres
+    return press_key("ctrl+v")
+
+
+def type_text(text: str, delay_ms: int = 40, dwell_ms: int = 0) -> dict:
+    _stamp()
+    ch = _xt()
+    if ch is not None:
+        saved = None
+        try:
+            pasted: list[str] = []
+            if any(ch.needs_remap(keysym_for(c)) for c in text) and active_window_is_browser():
+                # A scratch-keycode remap gives a page an odd or empty
+                # event.code, which is a tell. Type what is on the keyboard,
+                # paste what is not.
+                run = ""
+                for c in text:
+                    if ch.needs_remap(keysym_for(c)):
+                        if run:
+                            ch.type_text(run, delay_ms=delay_ms, dwell_ms=dwell_ms)
+                            run = ""
+                        if saved is None:
+                            saved = _clipboard_snapshot()
+                        r = _paste(c)
+                        if not r.get("ok"):
+                            return {"ok": False, "error": f"paste failed: {r.get('error')}",
+                                    "typed_len": len(pasted), "via": "xtest+paste"}
+                        pasted.append(c)
+                    else:
+                        run += c
+                if run:
+                    ch.type_text(run, delay_ms=delay_ms, dwell_ms=dwell_ms)
+                return {"ok": True, "typed_len": len(text), "via": "xtest+paste",
+                        "pasted": pasted}
+            n = ch.type_text(text, delay_ms=delay_ms, dwell_ms=dwell_ms)
+        except Exception as exc:
+            return {"ok": False, "error": f"typing failed: {exc}", "via": "xtest"}
+        else:
+            return {"ok": True, "typed_len": n, "via": "xtest"}
+        finally:
+            _clipboard_restore(saved)
     _require("xdotool")
     result = _run(["xdotool", "type", "--delay", str(delay_ms), "--file", "-"], input_text=text)
     if result.returncode:
@@ -174,8 +368,20 @@ def type_text(text: str, delay_ms: int = 40) -> dict:
     return {"ok": True, "typed_len": len(text)}
 
 
-def press_key(key: str) -> dict:
-    """xdotool key syntax: 'Return', 'Tab', 'ctrl+c', 'super+l', 'KP_0'."""
+def press_key(key: str, hold_ms: int = 0) -> dict:
+    """xdotool key syntax: 'Return', 'Tab', 'ctrl+c', 'super+l', 'KP_0'.
+
+    hold_ms is how long the base key stays down on the XTest path (Human
+    Mode dwell). The xdotool fallback has no hold and ignores it.
+    """
+    _stamp(escape=_is_escape(key))
+    ch = _xt()
+    if ch is not None:
+        try:
+            ch.press_combo(key, hold_ms=hold_ms)
+        except Exception as exc:
+            return {"ok": False, "error": f"key failed: {exc}", "key": key, "via": "xtest"}
+        return {"ok": True, "key": key, "via": "xtest"}
     _require("xdotool")
     _run(["xdotool", "key", key])
     return {"ok": True, "key": key}
@@ -191,6 +397,11 @@ _MODIFIERS = {"ctrl", "control", "alt", "shift", "super", "meta"}
 
 def pointer_position() -> dict:
     """Where the pointer is now, and which window is under it."""
+    ch = _xt()
+    if ch is not None:
+        p = ch.pointer_position()
+        return {"ok": True, "x": p["x"], "y": p["y"], "screen": "0",
+                "window": str(p["window"] or 0), "buttons": p["buttons"], "via": "xtest"}
     _require("xdotool")
     out = _run(["xdotool", "getmouselocation", "--shell"]).stdout
     vals = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
@@ -201,6 +412,16 @@ def pointer_position() -> dict:
 def mouse_down(button: int = 1, x: int | None = None, y: int | None = None) -> dict:
     """Press and HOLD a mouse button. Pair with mouse_up or the desktop is left
     with a stuck button."""
+    _stamp()
+    if x is not None and y is not None:
+        _placed(x, y)
+    ch = _xt()
+    if ch is not None:
+        if x is not None and y is not None:
+            emit_cursor("move", x, y)
+            ch.move(x, y)
+        ch.button(button, True)
+        return {"ok": True, "held": button, "at": [x, y] if x is not None else None, "via": "xtest"}
     _require("xdotool")
     cmd = ["xdotool"]
     if x is not None and y is not None:
@@ -212,6 +433,14 @@ def mouse_down(button: int = 1, x: int | None = None, y: int | None = None) -> d
 
 
 def mouse_up(button: int = 1, x: int | None = None, y: int | None = None) -> dict:
+    ch = _xt()
+    if ch is not None:
+        if x is not None and y is not None:
+            ch.move(x, y)
+        ch.button(button, False)
+        if x is not None and y is not None:
+            emit_cursor("click", x, y)
+        return {"ok": True, "released": button, "via": "xtest"}
     _require("xdotool")
     cmd = ["xdotool"]
     if x is not None and y is not None:
@@ -225,12 +454,27 @@ def mouse_up(button: int = 1, x: int | None = None, y: int | None = None) -> dic
 
 def key_down(key: str) -> dict:
     """Hold a key down (modifiers especially). Pair with key_up."""
+    _stamp(escape=_is_escape(key))
+    ch = _xt()
+    if ch is not None:
+        try:
+            ch.key(key, True)
+        except Exception as exc:
+            return {"ok": False, "error": f"key_down failed: {exc}", "key": key, "via": "xtest"}
+        return {"ok": True, "held": key, "via": "xtest"}
     _require("xdotool")
     _run(["xdotool", "keydown", key])
     return {"ok": True, "held": key}
 
 
 def key_up(key: str) -> dict:
+    ch = _xt()
+    if ch is not None:
+        try:
+            ch.key(key, False)
+        except Exception as exc:
+            return {"ok": False, "error": f"key_up failed: {exc}", "key": key, "via": "xtest"}
+        return {"ok": True, "released": key, "via": "xtest"}
     _require("xdotool")
     _run(["xdotool", "keyup", key])
     return {"ok": True, "released": key}
@@ -243,12 +487,26 @@ def click_with(x: int, y: int, button: int = 1, count: int = 1,
     The modifiers are released even if the click fails, so a crash mid-sequence
     cannot leave ctrl stuck down for the human using the machine afterwards.
     """
-    _require("xdotool")
     mods = [m.strip().lower() for m in (modifiers or []) if m.strip()]
     unknown = [m for m in mods if m not in _MODIFIERS]
     if unknown:
         return {"ok": False, "error": f"unknown modifier(s) {unknown}",
                 "supported": sorted(_MODIFIERS)}
+    ch = _xt()
+    if ch is not None:
+        held = []
+        try:
+            for mod in mods:
+                ch.key(mod, True)
+                held.append(mod)
+            return click(x, y, button=button, count=count)
+        finally:
+            for mod in reversed(held):
+                try:
+                    ch.key(mod, False)
+                except Exception:
+                    pass
+    _require("xdotool")
     for mod in mods:
         _run(["xdotool", "keydown", mod])
     try:
@@ -264,8 +522,14 @@ def scroll_at(x: int, y: int, direction: str, amount: int = 3) -> dict:
     button = {"up": 4, "down": 5, "left": 6, "right": 7}.get(direction)
     if not button:
         return {"ok": False, "error": "direction must be up|down|left|right"}
-    _require("xdotool")
     emit_cursor("move", x, y)
+    _stamp()
+    _placed(x, y)
+    ch = _xt()
+    if ch is not None:
+        ch.click(x, y, button=button, count=amount, gap_ms=0)
+        return {"ok": True, "at": [x, y], "scrolled": direction, "amount": amount, "via": "xtest"}
+    _require("xdotool")
     _run(["xdotool", "mousemove", str(x), str(y), "click", "--repeat", str(amount), str(button)])
     return {"ok": True, "at": [x, y], "scrolled": direction, "amount": amount}
 
@@ -304,6 +568,19 @@ def monitors() -> list[dict]:
 
 def active_window() -> dict:
     """The window that currently has focus."""
+    ch = _xt()
+    if ch is not None:
+        try:
+            info = ch.active_window_info()
+        except Exception:
+            info = {"ok": False}
+        if info.get("ok"):
+            # Geometry still needs one xdotool call; identity does not, and
+            # identity is what callers ask for most (focus checks, browser
+            # detection, the bot-challenge check on every human click).
+            return {"ok": True, "id": str(info["id"]), "name": info["name"],
+                    "pid": str(info.get("pid") or ""), "class": info.get("class"),
+                    "via": "xtest"}
     _require("xdotool")
     wid = _run(["xdotool", "getactivewindow"]).stdout.strip()
     if not wid:

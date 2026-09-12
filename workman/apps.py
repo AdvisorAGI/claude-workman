@@ -50,6 +50,23 @@ def _launch_allowed() -> bool:
     )
 
 
+#: A browser started with any of these is not the owner's browser, and a page
+#: can tell: an open debug port answers probes, --enable-automation sets
+#: navigator.webdriver, a scratch profile has no history and no logins. The
+#: launcher refuses them; a person opens the normal launcher and the
+#: logged-in Default profile.
+AUTOMATION_FLAGS = (
+    "--remote-debugging-port", "--remote-debugging-pipe", "--remote-allow-origins",
+    "--enable-automation", "--headless", "--user-data-dir", "--load-extension",
+    "--disable-blink-features", "--test-type", "--enable-logging=stderr",
+)
+
+
+def automation_flags(argv: list[str]) -> list[str]:
+    """The arguments in argv that would mark a browser as automated."""
+    return [a for a in argv[1:] if any(a == f or a.startswith(f + "=") for f in AUTOMATION_FLAGS)]
+
+
 def launch(command: str, args: list[str] | None = None, wait_for_window: float = 0.0) -> dict:
     """Start a program detached from the server.
 
@@ -64,6 +81,11 @@ def launch(command: str, args: list[str] | None = None, wait_for_window: float =
     argv = shlex.split(command) if args is None else [command, *args]
     if not argv:
         return {"ok": False, "error": "no command given"}
+    flagged = automation_flags(argv)
+    if flagged and os.environ.get("WORKMAN_ALLOW_AUTOMATION_FLAGS") != "1":
+        return {"ok": False, "error": "automation_flags_refused", "flags": flagged,
+                "hint": "launch the browser the way the owner does: no debug port, no "
+                        "automation switch, no headless, the normal Default profile"}
     if shutil.which(argv[0]) is None:
         # macOS and Windows install most software as a bundle or a Start Menu
         # entry rather than something on PATH, so "not on PATH" is not the same

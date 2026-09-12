@@ -22,8 +22,9 @@ from .human import (  # re-export so chrome_* and tests share one implementation
     CHAR_DELAY_MS,
     CLICK_PRESS_MS,
     ENTER_MIN_MS,
+    MOTION_HZ,
     PATH_DURATION_MS,
-    PATH_STEPS,
+    PATH_MIN_STEPS,
     PATH_WAYPOINTS,
     click_press_ms,
     eased_path,
@@ -37,6 +38,56 @@ from .human import (  # re-export so chrome_* and tests share one implementation
 
 CDP_BASE = "http://127.0.0.1:9222"
 CDP_TIMEOUT_S = 1.5
+#: CDP is OFF unless WORKMAN_CHROME_CDP=1. An open debug port is something a
+#: page can notice (it can probe ws://127.0.0.1:9222), and a Chrome started
+#: with --remote-debugging-port is not the owner's normal browser. Tab
+#: identity comes from the window title and the AT-SPI tree instead.
+CDP_ENV = "WORKMAN_CHROME_CDP"
+
+#: Window titles and headline text that mean "a bot check is on screen".
+#: Matching is deliberately narrow: these are the challenge pages' own
+#: words, not anything that merely mentions a captcha.
+CHALLENGE_MARKERS = (
+    "just a moment", "attention required! | cloudflare", "verify you are human",
+    "are you a robot", "checking your browser", "checking if the site connection",
+    "bot verification", "security check", "please verify you are", "press & hold",
+    "press and hold", "hcaptcha", "recaptcha", "verify you're human",
+    "confirm you are human", "access denied", "unusual traffic",
+)
+CHALLENGE_INSTRUCTION = (
+    "A bot challenge is on screen. Do not try to solve it, do not click or "
+    "type in this window. Tell the owner and leave it to him; input resumes "
+    "on its own once the page title changes."
+)
+
+
+def cdp_enabled() -> bool:
+    import os
+    return os.environ.get(CDP_ENV, "0").strip().lower() in ("1", "true", "yes", "on")
+
+
+def looks_like_challenge(title: str = "", text: str = "") -> bool:
+    """Whether a window title (and optionally the top of the page text) is
+    a bot challenge. Only the first 600 characters of text count: that is
+    where a challenge page says what it is."""
+    hay = f"{title or ''}\n{(text or '')[:600]}".lower()
+    return any(m in hay for m in CHALLENGE_MARKERS)
+
+
+def challenge_active() -> bool:
+    """A bot challenge is in the ACTIVE window right now. Cheap on X11 (three
+    property reads); False whenever the title cannot be read."""
+    try:
+        win = desktop.active_window()
+    except Exception:
+        return False
+    if not isinstance(win, dict) or not win.get("ok"):
+        return False
+    if not is_chrome_window(win):
+        return False
+    return looks_like_challenge(win.get("name") or "")
+
+
 TEXT_CAP = 20000
 MAX_TAB_SWITCHES = 16
 TOOLBAR_PX = 90
@@ -74,6 +125,8 @@ def cdp_request(path: str = "/json") -> tuple[object | None, str | None]:
     plain text; that is treated as success (`{"ok": True, ...}`), not a parse
     failure. Unreachable CDP is (`None`, reason) — never an exception.
     """
+    if not cdp_enabled():
+        return None, f"cdp disabled (set {CDP_ENV}=1 to allow the HTTP side channel)"
     path = path if path.startswith("/") else f"/{path}"
     url = f"{CDP_BASE.rstrip('/')}{path}"
     try:
@@ -418,10 +471,18 @@ def click_text(text: str, rng: random.Random | None = None) -> dict:
         if not found:
             break
         el = found
-    cx, cy = int(el["cx"]), int(el["cy"])
-    clicked = human_click(cx, cy, rng=rng)
-    return {"ok": True, "clicked": {"role": el.get("role"), "name": el.get("name"),
-                                    "x": cx, "y": cy},
+    # A Gaussian point inside the element's box, as atspi.click_element does:
+    # the exact centre on every click is a pattern a page can learn.
+    clicked = human.human_click_element(el, rng=rng)
+    cx, cy = (clicked.get("aimed") or [el.get("cx"), el.get("cy")])[:2]
+    target = {"role": el.get("role"), "name": el.get("name"), "x": cx, "y": cy}
+    if not clicked.get("ok"):
+        # The pointer may have stopped short (owner pause, backend error): say
+        # so rather than reporting a click that never landed.
+        out = dict(clicked)
+        out["target"] = target
+        return out
+    return {"ok": True, "clicked": target,
             "press_ms": clicked.get("press_ms"), "at": clicked.get("at")}
 
 
@@ -454,7 +515,10 @@ def wait_load(timeout_s: float = 15, poll_s: float = 0.35,
         if title == last_title and not loading:
             stable += 1
             if stable >= stable_needed:
-                return {"ok": True, "title": title, "stable_polls": stable, "cdp": cdp_up}
+                out = {"ok": True, "title": title, "stable_polls": stable, "cdp": cdp_up}
+                if looks_like_challenge(title):
+                    out.update({"bot_challenge": True, "instruction": CHALLENGE_INSTRUCTION})
+                return out
         else:
             stable = 0
             last_title = title

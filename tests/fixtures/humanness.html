@@ -1,0 +1,204 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<title>workman humanness detector</title>
+<style>
+  body { font: 14px/1.4 system-ui, sans-serif; margin: 24px; background: #fafafa; color: #222; }
+  #target { width: 260px; height: 90px; margin: 24px 0; border: 2px solid #333; border-radius: 8px; background: #cfe8ff;
+            display: flex; align-items: center; justify-content: center; font-size: 18px; user-select: none; }
+  #target.hot { background: #ffe7a8; }
+  #field { width: 420px; font-size: 16px; padding: 6px; background: #fff2cc; border: 2px solid #333; }
+  #summarise { background: #d9f7be; border: 2px solid #333; padding: 6px 14px; font-size: 15px; }
+  pre { background: #fff; border: 1px solid #ccc; padding: 8px; max-height: 320px; overflow: auto; font-size: 12px; }
+  .bad { color: #b00020; font-weight: 600; }
+  .ok { color: #0a7a2a; font-weight: 600; }
+  #summary { font-size: 15px; }
+</style>
+</head>
+<body>
+<h1>workman humanness detector</h1>
+<p>Loaded from <code>file://</code>. Logs every pointer and key event this page can see. Nothing is sent anywhere.</p>
+<div id="target">click here</div>
+<label>type here: <input id="field" type="text" autocomplete="off"></label>
+<p><button id="summarise">Summarise</button> <button id="reset">Reset</button></p>
+<div id="summary"></div>
+<pre id="log"></pre>
+<script>
+(function () {
+  const log = document.getElementById('log');
+  const summary = document.getElementById('summary');
+  const target = document.getElementById('target');
+  const field = document.getElementById('field');
+  const state = fresh();
+
+  function fresh() {
+    return {
+      moves: [],            // {t, x, y, trusted}
+      downs: [],            // {t, x, y, button, trusted}
+      ups: [],
+      clicks: [],
+      keydowns: [],         // {t, key, code, trusted, shift}
+      keyups: [],
+      wheels: [],           // {t, dy, trusted}
+      untrusted: 0,
+      total: 0,
+    };
+  }
+
+  function line(s) {
+    log.textContent += s + '\n';
+    log.scrollTop = log.scrollHeight;
+  }
+
+  function note(kind, e, extra) {
+    state.total++;
+    if (e.isTrusted === false) state.untrusted++;
+    const row = Object.assign({ t: e.timeStamp, trusted: e.isTrusted }, extra || {});
+    return row;
+  }
+
+  document.addEventListener('mousemove', function (e) {
+    const r = note('move', e, { x: e.clientX, y: e.clientY });
+    state.moves.push(r);
+  }, true);
+  document.addEventListener('mousedown', function (e) {
+    const r = note('down', e, { x: e.clientX, y: e.clientY, button: e.button });
+    state.downs.push(r);
+    line('mousedown  t=' + e.timeStamp.toFixed(1) + ' at ' + e.clientX + ',' + e.clientY +
+         ' button=' + e.button + ' trusted=' + e.isTrusted + ' movementX=' + e.movementX);
+    if (e.target === target) target.classList.add('hot');
+  }, true);
+  document.addEventListener('mouseup', function (e) {
+    const r = note('up', e, { x: e.clientX, y: e.clientY, button: e.button });
+    state.ups.push(r);
+    const d = state.downs[state.downs.length - 1];
+    line('mouseup    t=' + e.timeStamp.toFixed(1) + (d ? ' hold=' + (e.timeStamp - d.t).toFixed(1) + 'ms' : '') +
+         ' trusted=' + e.isTrusted);
+    target.classList.remove('hot');
+  }, true);
+  document.addEventListener('click', function (e) {
+    const r = note('click', e, { x: e.clientX, y: e.clientY, detail: e.detail });
+    state.clicks.push(r);
+    line('click      t=' + e.timeStamp.toFixed(1) + ' detail=' + e.detail + ' trusted=' + e.isTrusted);
+  }, true);
+  document.addEventListener('wheel', function (e) {
+    const r = note('wheel', e, { dy: e.deltaY, mode: e.deltaMode });
+    state.wheels.push(r);
+    line('wheel      t=' + e.timeStamp.toFixed(1) + ' deltaY=' + e.deltaY + ' mode=' + e.deltaMode + ' trusted=' + e.isTrusted);
+  }, { capture: true, passive: true });
+  document.addEventListener('keydown', function (e) {
+    const r = note('keydown', e, { key: e.key, code: e.code, shift: e.shiftKey, repeat: e.repeat });
+    state.keydowns.push(r);
+    line('keydown    t=' + e.timeStamp.toFixed(1) + ' key=' + JSON.stringify(e.key) + ' code=' + JSON.stringify(e.code) +
+         ' shift=' + e.shiftKey + ' trusted=' + e.isTrusted);
+  }, true);
+  document.addEventListener('keyup', function (e) {
+    const r = note('keyup', e, { key: e.key, code: e.code });
+    state.keyups.push(r);
+    const d = [...state.keydowns].reverse().find(k => k.code === e.code);
+    line('keyup      t=' + e.timeStamp.toFixed(1) + ' key=' + JSON.stringify(e.key) +
+         (d ? ' dwell=' + (e.timeStamp - d.t).toFixed(1) + 'ms' : '') + ' trusted=' + e.isTrusted);
+  }, true);
+  field.addEventListener('input', function (e) {
+    line('input      inputType=' + e.inputType + ' data=' + JSON.stringify(e.data) + ' trusted=' + e.isTrusted +
+         ' value=' + JSON.stringify(field.value));
+  });
+
+  function stats(values) {
+    if (!values.length) return null;
+    const s = [...values].sort((a, b) => a - b);
+    const mean = s.reduce((a, b) => a + b, 0) / s.length;
+    return { n: s.length, min: +s[0].toFixed(1), median: +s[Math.floor(s.length / 2)].toFixed(1),
+             mean: +mean.toFixed(1), max: +s[s.length - 1].toFixed(1) };
+  }
+
+  function summarise() {
+    const out = {};
+    out.navigator_webdriver = navigator.webdriver;
+    out.events_total = state.total;
+    out.events_untrusted = state.untrusted;
+    // pointer: samples per click and intervals between samples
+    const intervals = [];
+    const jumps = [];
+    for (let i = 1; i < state.moves.length; i++) {
+      const a = state.moves[i - 1], b = state.moves[i];
+      const dt = b.t - a.t;
+      if (dt < 400) intervals.push(dt);
+      jumps.push(Math.hypot(b.x - a.x, b.y - a.y));
+    }
+    out.pointer_samples = state.moves.length;
+    out.pointer_interval_ms = stats(intervals);
+    out.pointer_step_px = stats(jumps);
+    out.pointer_teleports_over_80px = jumps.filter(j => j > 80).length;
+    // clicks: down-up hold, and how many move samples arrived in the 500 ms before each down
+    const holds = [];
+    const samplesBefore = [];
+    state.downs.forEach((d, i) => {
+      const u = state.ups.find(u => u.t >= d.t);
+      if (u) holds.push(u.t - d.t);
+      samplesBefore.push(state.moves.filter(m => m.t < d.t && m.t > d.t - 500).length);
+    });
+    out.click_hold_ms = stats(holds);
+    out.move_samples_in_500ms_before_click = stats(samplesBefore);
+    // keys: dwell (down->up per code) and flight (up->next down)
+    const dwells = [];
+    const flights = [];
+    const codes = new Set();
+    let missingCode = 0;
+    let shiftedCapitals = 0, capitals = 0;
+    state.keydowns.forEach((k, i) => {
+      codes.add(k.code);
+      if (!k.code) missingCode++;
+      if (k.key.length === 1 && k.key !== k.key.toLowerCase()) { capitals++; if (k.shift) shiftedCapitals++; }
+      const up = state.keyups.find(u => u.t >= k.t && u.code === k.code);
+      if (up) dwells.push(up.t - k.t);
+      const next = state.keydowns[i + 1];
+      if (up && next && next.t - up.t < 3000) flights.push(next.t - up.t);
+    });
+    out.key_count = state.keydowns.length;
+    out.key_dwell_ms = stats(dwells);
+    out.key_flight_ms = stats(flights);
+    out.key_flight_overlaps = flights.filter(f => f < 0).length;
+    out.keys_with_empty_code = missingCode;
+    out.capitals = capitals;
+    out.capitals_with_shift = shiftedCapitals;
+    out.wheel_events = state.wheels.length;
+    out.wheel_intervals_ms = stats(state.wheels.slice(1).map((w, i) => w.t - state.wheels[i].t));
+    // verdicts
+    const flags = [];
+    if (navigator.webdriver) flags.push('navigator.webdriver is true');
+    if (state.untrusted) flags.push(state.untrusted + ' untrusted events');
+    if (out.pointer_teleports_over_80px) flags.push(out.pointer_teleports_over_80px + ' pointer teleports');
+    if (out.move_samples_in_500ms_before_click && out.move_samples_in_500ms_before_click.min === 0)
+      flags.push('a click arrived with no pointer motion before it');
+    if (out.click_hold_ms && (out.click_hold_ms.min < 40 || out.click_hold_ms.max > 250))
+      flags.push('click hold outside 40-250 ms');
+    if (out.key_dwell_ms && out.key_dwell_ms.min < 15) flags.push('a key dwell under 15 ms');
+    if (out.key_dwell_ms && out.key_dwell_ms.n > 4 && out.key_dwell_ms.min === out.key_dwell_ms.max)
+      flags.push('every key dwell identical');
+    if (missingCode) flags.push(missingCode + ' keys with empty event.code');
+    if (capitals && shiftedCapitals !== capitals) flags.push('capital letters typed without Shift');
+    out.flags = flags;
+    out.verdict = flags.length ? 'LOOKS SCRIPTED: ' + flags.join('; ') : 'nothing here distinguishes this from a person';
+    summary.innerHTML = '<span class="' + (flags.length ? 'bad' : 'ok') + '">' + out.verdict + '</span>';
+    line('SUMMARY ' + JSON.stringify(out));
+    window.__humanness = out;
+    // The title carries the whole summary so a harness can read it off the window (no CDP, no DOM access).
+    document.title = (flags.length ? 'SCRIPTED ' : 'HUMAN ') + JSON.stringify(out);
+    return out;
+  }
+
+  document.getElementById('summarise').addEventListener('click', summarise);
+  document.getElementById('reset').addEventListener('click', function () {
+    Object.assign(state, fresh());
+    log.textContent = '';
+    summary.textContent = '';
+    document.title = 'workman humanness detector';
+  });
+  window.summarise = summarise;
+  line('ready: navigator.webdriver=' + navigator.webdriver + ' ua=' + navigator.userAgent);
+})();
+</script>
+</body>
+</html>

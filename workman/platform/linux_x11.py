@@ -40,6 +40,7 @@ press_key = x11.press_key
 key_down = x11.key_down
 key_up = x11.key_up
 emit_cursor = x11.emit_cursor
+foreign_pointer_motion = x11.foreign_pointer_motion
 
 
 def display_name() -> str:
@@ -140,6 +141,9 @@ def platform_info() -> dict:
         "wayland": session == "wayland",
         "tools": {name: bool(shutil.which(name))
                   for name in ("xdotool", "ffmpeg", "xrandr", "xclip")},
+        # 'xtest' means input and capture go over one persistent X
+        # connection (no process per action); 'xdotool' is the spawn path.
+        "input_channel": x11.input_channel(),
         "modifier_super": "Super",
         "notes": ("Under a Wayland session XTEST input and x11grab only reach "
                   "XWayland clients; log into an Xorg session for full control."

@@ -15,11 +15,56 @@ Run:  python -m workman.server        (stdio MCP server)
 """
 from __future__ import annotations
 
+import importlib
+import sys
 import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import a11y, apps, bridge, chrome, desktop, human, session, shotlog, vision
+from . import desktop, human
+
+
+class _NeverRaised(Exception):
+    """Exception type handed out for a missing module's exception classes, so
+    an `except mod.SomeError` clause stays a valid clause instead of a
+    TypeError when the module never imported."""
+
+
+class _Unavailable:
+    """Stand-in for a module that failed to import. Its tools answer with the
+    import error instead of the whole server failing to start."""
+
+    def __init__(self, name: str, exc: BaseException):
+        self._name = name
+        self._why = f"{type(exc).__name__}: {exc}"
+
+    def __getattr__(self, attr: str):
+        # CapitalisedNames are exception classes by convention in this
+        # package (VisionUnavailable, Unsupported, ...); everything else is a
+        # function whose reply says what is missing.
+        if attr[:1].isupper():
+            return _NeverRaised
+
+        def unavailable(*_args, **_kwargs) -> dict:
+            return {"ok": False, "error": "module_unavailable",
+                    "module": self._name, "detail": self._why}
+        return unavailable
+
+
+def _optional(name: str):
+    try:
+        return importlib.import_module(f".{name}", __package__)
+    except Exception as exc:
+        sys.stderr.write(f"workman: {name} unavailable, its tools will say so: {exc}\n")
+        return _Unavailable(name, exc)
+
+
+# `_remote` because the `remote` tool below would otherwise shadow the module.
+(a11y, account, apps, bridge, chrome, esc_pause, handback, owner_pause, _remote,
+ resume, session, shortcuts, shotlog, vision, workspace_layout) = (_optional(n) for n in (
+    "a11y", "account", "apps", "bridge", "chrome", "esc_pause", "handback",
+    "owner_pause", "remote", "resume", "session", "shortcuts", "shotlog", "vision",
+    "workspace_layout"))
 
 mcp = FastMCP("claude-workman")
 
@@ -37,6 +82,32 @@ def _to_screen(x: float, y: float, space: str) -> tuple[int, int]:
         raise ValueError(f"space must be 'screen' or 'view', got {space!r}")
     scale = _LAST_VIEW.get("scale") or 1.0
     return int(round(x / scale)), int(round(y / scale))
+
+
+def _challenge_refusal(name: str) -> dict | None:
+    """A bot challenge in the active browser window stops every input tool.
+    Nothing here tries to pass it: the owner does, by hand."""
+    try:
+        active = chrome.challenge_active()
+    except Exception:
+        return None
+    if not active:
+        return None
+    return {"ok": False, "error": "bot_challenge", "action": name,
+            "instruction": getattr(chrome, "CHALLENGE_INSTRUCTION",
+                                   "A bot challenge is on screen; leave it to the owner.")}
+
+
+def _input(name: str, args: dict, run) -> dict:
+    """Every input tool goes through here: the challenge check, the note of
+    where the pointer was before the agent's first touch, and the memory of
+    an interrupted result so resume_interrupted can finish it."""
+    refused = _challenge_refusal(name)
+    if refused is not None:
+        return resume.remember(name, args, refused)
+    handback.note_pointer_before()
+    result = run()
+    return resume.remember(name, args, result)
 
 
 # ---- SEE -------------------------------------------------------------------
@@ -113,9 +184,39 @@ def zoom(x1: int, y1: int, x2: int, y2: int, space: str = "view",
         data, meta = vision.magnify(raw)
     except (ValueError, vision.VisionUnavailable) as exc:
         return [{"ok": False, "error": str(exc)}]
-    meta.update({"ok": True, "region_screen": [rx, ry, rx + rw, ry + rh],
-                 "note": "coordinates inside this crop are relative to it — "
-                         "add the region origin before clicking"})
+    # One capture, many targets. The caller reads several coordinates off this
+    # one image and maps each back to the screen, so the mapping is returned
+    # rather than left to be derived from `magnification`, which is the wrong
+    # number to derive it from: magnification is the image measured against the
+    # CROP, and a crop is whatever the backend grabbed. Measured here, the
+    # macOS grab comes back in points (a 120x80 point region gives a 120x80
+    # image), so the two happen to agree; a backend that grabs a 2x display in
+    # device pixels makes them differ by exactly that 2, and every mapped click
+    # then lands at half the intended offset. `factor` is the region's width in
+    # screen points over the returned image's width, so it is right either way
+    # and the caller never has to know which kind of grab it got.
+    image_w, image_h = (meta.get("magnified") or [rw, rh])[:2]
+    image_w, image_h = int(image_w) or rw, int(image_h) or rh
+    factor_x, factor_y = rw / image_w, rh / image_h
+    meta.update({
+        "ok": True,
+        "region_screen": [rx, ry, rx + rw, ry + rh],
+        "origin": [rx, ry],
+        "factor": round((factor_x + factor_y) / 2, 6),
+        "factor_xy": [round(factor_x, 6), round(factor_y, 6)],
+        "to_screen": "screen_x = origin[0] + image_x * factor, "
+                     "screen_y = origin[1] + image_y * factor",
+        "note": "coordinates read off this image are relative to the crop and "
+                "magnified. Map each one with `to_screen` and click it with "
+                "space='screen'; several targets can be mapped from this one "
+                "capture, so plan the whole sequence before capturing again",
+    })
+    crop_w = int((meta.get("crop") or [0])[0] or 0)
+    if crop_w and crop_w != rw:
+        # A Retina grab comes back in device pixels while the region is in
+        # points. Saying so beats leaving a caller to wonder why the numbers do
+        # not divide.
+        meta["device_scale"] = round(crop_w / rw, 3)
     if save_to_disk:
         meta["saved_to"] = vision.save(data, "jpg")
     shot = shotlog.archive_capture(data, "jpeg", "zoom")
@@ -161,7 +262,26 @@ def workman_platform() -> dict:
     info = desktop.platform_info()
     info["accessibility"] = a11y.backend_name()
     info["human_mode"] = human.get_mode()
+    # Owner priority: the pause switch, presence ages and the Escape listener.
+    try:
+        info["owner_pause"] = owner_pause.status()
+        info["esc_listener_pid"] = esc_pause.listener_pid()
+    except Exception as exc:
+        info["owner_pause_error"] = str(exc)
+    # Chrome's debug port is never used unless WORKMAN_CHROME_CDP=1; whether
+    # something is listening on it is reported so nobody has to guess.
+    info["chrome_cdp"] = {"enabled": bool(chrome.cdp_enabled()),
+                          "port_listening": _port_open(9222)}
     return info
+
+
+def _port_open(port: int, host: str = "127.0.0.1", timeout: float = 0.1) -> bool:
+    import socket
+    try:
+        with socket.create_connection((host, port), timeout=timeout):
+            return True
+    except OSError:
+        return False
 
 
 # ---- WINDOWS ---------------------------------------------------------------
@@ -173,11 +293,41 @@ def list_windows() -> list[dict]:
 
 
 @mcp.tool()
-def focus_window(query: str, minimize_blockers: bool = True) -> dict:
+def focus_window(query: str, minimize_blockers: bool = True,
+                 learn_shortcuts: bool = True) -> dict:
     """Raise a window by id or name-substring. On focus-stealing WMs (e.g.
     mutter) plain activation can silently fail, so the frontmost blocker is
-    minimized first. Always screenshot to verify focus before typing."""
-    return desktop.focus_window(query, minimize_blockers=minimize_blockers)
+    minimized first. Always screenshot to verify focus before typing.
+
+    When `learn_shortcuts` is true (default), the first focus of an app this
+    week harvests its menu-bar chords into the durable learned-shortcuts store
+    so later `shortcut()` calls never forget them. Harvest failure never fails
+    the focus itself.
+    """
+    result = desktop.focus_window(query, minimize_blockers=minimize_blockers)
+    if not learn_shortcuts:
+        return result
+    app = ""
+    if isinstance(result, dict):
+        app = str((result.get("app") or result.get("name")
+                   or (result.get("window") or {}).get("app")
+                   or "")).strip()
+    if not app:
+        try:
+            active = desktop.active_window()
+            if isinstance(active, dict):
+                app = str(active.get("app") or active.get("name") or "").strip()
+        except Exception:
+            app = ""
+    if app:
+        try:
+            from . import learned_shortcuts
+            result = dict(result) if isinstance(result, dict) else {"focus": result}
+            result["shortcuts_learned"] = learned_shortcuts.ensure_learned(app)
+        except Exception as exc:
+            if isinstance(result, dict):
+                result["shortcuts_learned"] = {"ok": False, "error": str(exc)}
+    return result
 
 
 @mcp.tool()
@@ -198,6 +348,49 @@ def window_geometry(query: str, x: int | None = None, y: int | None = None,
     """Move and/or resize a window. Omitted values are left alone. A maximized
     window ignores geometry, so it is unmaximized first."""
     return desktop.window_geometry(query, x=x, y=y, w=w, h=h)
+
+
+@mcp.tool()
+def window_tile(action: str, query: str = "", display: int | str | None = None,
+                prefer_menu: bool = True) -> dict:
+    """Tile a window the way the operating system tiles it: halves, quarters,
+    fill, center, and back again.
+
+    action: tile_left | tile_right | tile_top | tile_bottom | tile_top_left |
+    tile_top_right | tile_bottom_left | tile_bottom_right | fill | center |
+    tile_restore. `query` names the window or its application and defaults to
+    the active one; on a multi-window application the named window is made the
+    app's main window first, so this moves the window asked for rather than
+    whichever was in front.
+
+    On macOS this clicks the app's own Window > Move & Resize menu, so the
+    result is the system's rectangle, gap and menu bar inset included, rather
+    than one computed here. There is no keyboard route to substitute for it:
+    the built-in chords need the Globe/fn modifier, which macOS resolves below
+    the event tap and strips from a synthetic event, and the menu items carry
+    no key equivalent of their own. An application with no Window menu, a move
+    to another display, and every non-macOS backend fall back to writing a
+    computed rectangle. `route` says which one ran ('native_menu' or
+    'geometry'), `honored` compares the result against the computed tile, and
+    `activated` records that the menu route had to bring the app forward,
+    because the click only lands on the frontmost application.
+    """
+    return workspace_layout.tile(action, query=query or None, display=display,
+                                 prefer_menu=prefer_menu)
+
+
+@mcp.tool()
+def window_tile_available(query: str = "") -> dict:
+    """Which tiling actions this window's app can do natively, right now.
+
+    Reads the app's Window menu without touching it, so it is safe on a screen
+    someone is using. `available` False is a normal answer for an application
+    that has no standard Window menu; `window_tile` still works there through
+    the computed route. `actions` lists only items that are enabled, so
+    tile_restore shows up on a window that has been tiled and not on one that
+    has not.
+    """
+    return workspace_layout.native_tiling(query or None)
 
 
 @mcp.tool()
@@ -255,16 +448,32 @@ def _click_with_human(x: int, y: int, button: int, count: int,
         return {"ok": False, "error": f"unknown modifier(s) {unknown}",
                 "supported": sorted(desktop.MODIFIERS)}
     rng = human.session_rng()
-    human.human_move(x, y, rng)
-    for mod in mods:
-        desktop.key_down(mod)
+    moved = human.human_move(x, y, rng)
+    if not moved.get("ok"):
+        return moved
+    held: list[str] = []
     try:
+        for mod in mods:
+            r = desktop.key_down(mod)
+            if isinstance(r, dict) and r.get("ok") is False:
+                return {"ok": False, "error": "interrupted", "reason": r,
+                        "clicked": False, "modifiers": mods, "human": True}
+            held.append(mod)
         press = human.human_press_click(button=button, count=count, rng=rng, aim=True)
         return {"ok": True, "clicked": [x, y], "button": button, "count": count,
                 "modifiers": mods, "press_ms": press, "human": True}
+    except human.Interrupted as exc:
+        return {"ok": False, "error": "interrupted", "reason": exc.result,
+                "clicked": False, "modifiers": mods, "human": True}
     finally:
-        for mod in reversed(mods):
-            desktop.key_up(mod)
+        # Only what actually went down comes back up: a stray key_up could
+        # release a key the owner is physically holding. One release failing
+        # must not strand the modifiers behind it.
+        for mod in reversed(held):
+            try:
+                desktop.key_up(mod)
+            except Exception:
+                pass
 
 
 # ---- MOUSE -----------------------------------------------------------------
@@ -281,14 +490,18 @@ def click(x: int, y: int, button: int = 1, count: int = 1,
         sx, sy = _to_screen(x, y, space)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-    if human.enabled():
+
+    def run():
+        if human.enabled():
+            if modifiers:
+                return _click_with_human(sx, sy, button=button, count=count,
+                                         modifiers=modifiers)
+            return human.human_click(sx, sy, button=button, count=count)
         if modifiers:
-            return _click_with_human(sx, sy, button=button, count=count,
-                                     modifiers=modifiers)
-        return human.human_click(sx, sy, button=button, count=count)
-    if modifiers:
-        return desktop.click_with(sx, sy, button=button, count=count, modifiers=modifiers)
-    return desktop.click(sx, sy, button=button, count=count)
+            return desktop.click_with(sx, sy, button=button, count=count, modifiers=modifiers)
+        return desktop.click(sx, sy, button=button, count=count)
+    return _input("click", {"x": sx, "y": sy, "button": button, "count": count,
+                            "modifiers": modifiers}, run)
 
 
 @mcp.tool()
@@ -299,9 +512,8 @@ def move(x: int, y: int, space: str = "screen") -> dict:
         sx, sy = _to_screen(x, y, space)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-    if human.enabled():
-        return human.human_move(sx, sy)
-    return desktop.move(sx, sy)
+    return _input("move", {"x": sx, "y": sy},
+                  lambda: human.human_move(sx, sy) if human.enabled() else desktop.move(sx, sy))
 
 
 @mcp.tool()
@@ -312,9 +524,9 @@ def hover(x: int, y: int, settle_ms: int = 350, space: str = "screen") -> dict:
         sx, sy = _to_screen(x, y, space)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-    if human.enabled():
-        return human.human_hover(sx, sy, settle_ms=settle_ms)
-    return desktop.hover(sx, sy, settle_ms=settle_ms)
+    return _input("hover", {"x": sx, "y": sy, "settle_ms": settle_ms},
+                  lambda: human.human_hover(sx, sy, settle_ms=settle_ms) if human.enabled()
+                  else desktop.hover(sx, sy, settle_ms=settle_ms))
 
 
 @mcp.tool()
@@ -325,9 +537,9 @@ def drag(from_x: int, from_y: int, to_x: int, to_y: int, space: str = "screen") 
         tx, ty = _to_screen(to_x, to_y, space)
     except ValueError as exc:
         return {"ok": False, "error": str(exc)}
-    if human.enabled():
-        return human.human_drag(fx, fy, tx, ty)
-    return desktop.drag(fx, fy, tx, ty)
+    return _input("drag", {"from_x": fx, "from_y": fy, "to_x": tx, "to_y": ty},
+                  lambda: human.human_drag(fx, fy, tx, ty) if human.enabled()
+                  else desktop.drag(fx, fy, tx, ty))
 
 
 @mcp.tool()
@@ -342,11 +554,14 @@ def scroll(direction: str, amount: int = 3, x: int | None = None, y: int | None 
             sx, sy = _to_screen(x, y, space)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-    if human.enabled():
-        return human.human_scroll(direction, amount=amount, x=sx, y=sy)
-    if sx is None or sy is None:
-        return desktop.scroll(direction, amount=amount)
-    return desktop.scroll_at(sx, sy, direction, amount=amount)
+
+    def run():
+        if human.enabled():
+            return human.human_scroll(direction, amount=amount, x=sx, y=sy)
+        if sx is None or sy is None:
+            return desktop.scroll(direction, amount=amount)
+        return desktop.scroll_at(sx, sy, direction, amount=amount)
+    return _input("scroll", {"direction": direction, "amount": amount, "x": sx, "y": sy}, run)
 
 
 @mcp.tool()
@@ -360,9 +575,19 @@ def mouse_button(button: int = 1, press: bool = True, x: int | None = None,
             sx, sy = _to_screen(x, y, space)
         except ValueError as exc:
             return {"ok": False, "error": str(exc)}
-    if human.enabled():
-        return human.human_mouse_button(button=button, press=press, x=sx, y=sy)
-    return (desktop.mouse_down if press else desktop.mouse_up)(button=button, x=sx, y=sy)
+
+    def run():
+        if human.enabled():
+            out = human.human_mouse_button(button=button, press=press, x=sx, y=sy)
+        else:
+            out = (desktop.mouse_down if press else desktop.mouse_up)(button=button, x=sx, y=sy)
+        if not (isinstance(out, dict) and out.get("ok") is False):
+            handback.note_button(button, press)
+        return out
+    if not press:
+        # A release is never refused or held back: nothing may stay stuck.
+        return run()
+    return _input("mouse_button", {"button": button, "press": press, "x": sx, "y": sy}, run)
 
 
 @mcp.tool()
@@ -383,25 +608,38 @@ def type_text(text: str, delay_ms: int = 40, typos: bool = False,
     spaces) is used instead of delay_ms. typos=True opts into a rare
     wrong-char-then-backspace; it stays off for password, URL, and money
     fields even when requested."""
-    if human.enabled():
-        return human.human_type(text, typos=typos, field=field)
-    return desktop.type_text(text, delay_ms=delay_ms)
+    return _input("type_text", {"text": text, "delay_ms": delay_ms, "typos": typos,
+                                "field": field},
+                  lambda: human.human_type(text, typos=typos, field=field) if human.enabled()
+                  else desktop.type_text(text, delay_ms=delay_ms))
 
 
 @mcp.tool()
 def press_key(key: str) -> dict:
     """Press a key/combo in xdotool syntax: 'Return', 'Tab', 'ctrl+c',
     'super+l', 'KP_0'."""
-    if human.enabled() and key.lower() in {"return", "enter", "kp_enter"}:
-        time.sleep(human.enter_delay_ms() / 1000.0)
-    return desktop.press_key(key)
+    def run():
+        if human.enabled() and key.lower() in {"return", "enter", "kp_enter"}:
+            time.sleep(human.enter_delay_ms() / 1000.0)
+        if human.enabled():
+            return desktop.press_key(key, hold_ms=human.key_dwell_ms())
+        return desktop.press_key(key)
+    return _input("press_key", {"key": key}, run)
 
 
 @mcp.tool()
 def key_hold(key: str, press: bool = True) -> dict:
     """Hold or release a key across other actions (e.g. hold 'ctrl', click
-    several items, release). Always release what you press."""
-    return (desktop.key_down if press else desktop.key_up)(key)
+    several items, release). Always release what you press; hand_back
+    releases whatever is still down."""
+    def run():
+        out = (desktop.key_down if press else desktop.key_up)(key)
+        if not (isinstance(out, dict) and out.get("ok") is False):
+            handback.note_key(key, press)
+        return out
+    if not press:
+        return run()
+    return _input("key_hold", {"key": key, "press": press}, run)
 
 
 @mcp.tool()
@@ -436,8 +674,14 @@ def clipboard_set(text: str, selection: str = "clipboard") -> dict:
 def launch_app(command: str, args: list[str] | None = None,
                wait_for_window: float = 8.0) -> dict:
     """Start an application, detached so it outlives this server. Waits for its
-    window to appear and returns it, so you can act without guessing a sleep."""
-    return apps.launch(command, args=args, wait_for_window=wait_for_window)
+    window to appear and returns it, so you can act without guessing a sleep.
+    hand_back closes what was launched here and nothing else. A browser
+    with a debug port, automation switch, headless flag or scratch profile
+    is refused: that is not the owner's browser and a page can tell."""
+    before = handback.window_ids()
+    out = apps.launch(command, args=args, wait_for_window=wait_for_window)
+    handback.note_launch(out, before=before)
+    return out
 
 
 @mcp.tool()
@@ -471,18 +715,25 @@ def accessibility_tree(app: str | None = None, actionable_only: bool = True) -> 
 
 @mcp.tool()
 def click_element(name: str, role: str | None = None, app: str | None = None) -> dict:
-    """Find an element by role+name in the accessibility tree and click its
-    center — element-accurate, no pixel guessing."""
-    return a11y.click_element(name, role=role, app=app)
+    """Find an element by role+name in the accessibility tree and click inside
+    its box with the real pointer: element-accurate, no pixel guessing, and
+    the click lands at a slightly different point each time like a hand does."""
+    return _input("click_element", {"name": name, "role": role, "app": app},
+                  lambda: a11y.click_element(name, role=role, app=app))
 
 
 @mcp.tool()
 def perform_element_action(name: str, action: str = "click", role: str | None = None,
                            app: str | None = None) -> dict:
     """Invoke an element's own action instead of clicking at it. Works where a
-    synthetic click cannot reach — occluded, scrolled, or under a pointer grab.
+    synthetic click cannot reach in a native (GTK) app: occluded, scrolled,
+    or under a pointer grab. In a browser or Electron app the tree only FINDS
+    the element and the real pointer presses it, because an AT-SPI action
+    fires a click with no pointer events behind it, which a page can see.
     Use element_actions to see what an element declares."""
-    return a11y.perform_action(name, action=action, role=role, app=app)
+    return _input("perform_element_action",
+                  {"name": name, "action": action, "role": role, "app": app},
+                  lambda: a11y.perform_action(name, action=action, role=role, app=app))
 
 
 @mcp.tool()
@@ -494,9 +745,13 @@ def element_actions(name: str, role: str | None = None, app: str | None = None) 
 @mcp.tool()
 def set_element_value(name: str, value: str, role: str | None = None,
                       app: str | None = None) -> dict:
-    """Set a field's contents directly. Beats click + select-all + type: no
-    keystroke timing, no stray keybindings, no autocomplete corruption."""
-    return a11y.set_value(name, value, role=role, app=app)
+    """Set a field's contents. In a native (GTK) app the value is written
+    through the toolkit: no keystroke timing, no stray keybindings, no
+    autocomplete corruption. In a browser or Electron app the field is
+    clicked, select-all is pressed and the value is typed with human cadence,
+    because a value that appears with no keys behind it is a tell."""
+    return _input("set_element_value", {"name": name, "value": value, "role": role, "app": app},
+                  lambda: a11y.set_value(name, value, role=role, app=app))
 
 
 @mcp.tool()
@@ -580,15 +835,16 @@ def chrome_click_text(text: str) -> dict:
     """Find a clickable element by visible name in Chrome's AT-SPI tree,
     scroll it into view if needed, and human-click it (eased pointer path,
     endpoint jitter)."""
-    return chrome.click_text(text)
+    return _input("chrome_click_text", {"text": text}, lambda: chrome.click_text(text))
 
 
 @mcp.tool()
 def chrome_type(text: str, human: bool = True) -> dict:
     """Type into the focused Chrome window. human=True uses per-character
-    cadence (50–300 ms, longer after spaces); wraps the same type-text
-    path as everywhere else."""
-    return chrome.type_text(text, human=human)
+    cadence (log-normal intervals, faster common bigrams, pauses between
+    words); wraps the same type-text path as everywhere else."""
+    return _input("chrome_type", {"text": text, "human": human},
+                  lambda: chrome.type_text(text, human=human))
 
 
 @mcp.tool()
@@ -882,9 +1138,180 @@ def session_handoff(cwd: str, content: str = "") -> dict:
     return session.handoff(cwd, content=content)
 
 
+# ---- ACCOUNT --------------------------------------------------------------
+# Which account this machine is signed in as, on the Claude lane and the Grok
+# lane. The plugin ships to whatever machine will have it, so nothing here may
+# assume an email address: a hook that launches a child `claude -p` has to ask
+# who the PARENT session is before it can hand the child the same identity.
+# Identity fields only, by allowlist. No token, key or credential value is read
+# by these tools, and the Grok seat is a presence check that never touches
+# XAI_API_KEY and never calls api.x.ai.
+
+@mcp.tool()
+def account_lanes(config_dir: str = "", transcript_path: str = "") -> dict:
+    """Every account lane on this machine, with the active one marked.
+
+    `claude.accounts` is one entry per config dir ($CLAUDE_CONFIG_DIR, then
+    ~/.claude, then every ~/.claude-* sibling), each carrying its config_dir,
+    the account_file it actually keeps its identity in, `logged_in`, and the
+    identity fields (emailAddress, displayName, organizationName,
+    organizationUuid, accountUuid, seatTier, billingType). `grok` reports the
+    CLI seat: installed, logged_in, auth_method, and whether an xAI key
+    variable is exported. No credential value is ever returned.
+
+    Use it to pick a lane on an unfamiliar machine: the DGX carries seven
+    config dirs and five distinct signed-in identities, so "the account" is not
+    a thing that can be assumed.
+    """
+    return account.lanes(config_dir=config_dir, transcript_path=transcript_path)
+
+
+@mcp.tool()
+def account_active(config_dir: str = "", transcript_path: str = "") -> dict:
+    """The one account lane THIS session is running on, and how that was decided.
+
+    `source` says which input won: argument, env ($CLAUDE_CONFIG_DIR),
+    transcript (the config dir is three levels above
+    <config_dir>/projects/<slug>/<session_id>.jsonl) or default (~/.claude).
+    Pass the hook payload's transcript_path when there is one; it is exact by
+    construction where a rebuilt cwd slug is not. When the env and the
+    transcript disagree the env wins and the other answer is reported as
+    `transcript_config_dir` rather than being dropped silently.
+
+    A child process launched with this config_dir runs as the same account as
+    the session that launched it, which is the whole point.
+    """
+    return account.active(config_dir=config_dir, transcript_path=transcript_path)
+
+
+# ---- OWNER PRIORITY, RESUME, HAND-BACK -------------------------------------
+# The owner's mouse and keyboard outrank the agent's, always. A physical
+# Escape pauses every input tool (the listener in workman.esc_pause flips
+# the switch and releases what the agent holds); while he is typing or
+# moving the mouse the tools wait a moment and then refuse rather than
+# fight him. Nothing here grabs a device. When he says resume, the last
+# interrupted action carries on from where it stopped.
+
+@mcp.tool()
+def input_control(action: str = "status", owner_confirmed: bool = False) -> dict:
+    """The owner-pause switch. action: status | resume | pause | release.
+
+    `status` reports the mouse/keyboard switches, who paused them and when,
+    how long ago the owner last touched a physical device, what the agent's
+    XTEST devices are holding, and the Escape listener's pid. `pause` turns
+    the switches off now and releases every held key and button. `release`
+    only releases. `resume` turns the switches back on and needs
+    owner_confirmed=True: an agent does not un-pause itself after the owner
+    pressed Escape; it asks him and passes his answer.
+    """
+    act = (action or "status").strip().lower()
+    if act == "status":
+        return {"ok": True, **esc_pause.status()}
+    if act == "release":
+        return esc_pause.release_agent_holds()
+    if act == "pause":
+        state = owner_pause.pause_from_escape()
+        released = esc_pause.release_agent_holds()
+        return {"ok": True, "state": state, "released": released}
+    if act == "resume":
+        if not owner_confirmed:
+            return {"ok": False, "error": "owner_confirmation_required",
+                    "instruction": ("Ask the owner whether agent input may resume, then call "
+                                    "input_control(action='resume', owner_confirmed=True). "
+                                    "resume_interrupted() then finishes what was cut short.")}
+        state = owner_pause.resume()
+        return {"ok": True, "state": state, "interrupted": resume.last()}
+    return {"ok": False, "error": f"unknown action {action!r}",
+            "actions": ["status", "resume", "pause", "release"]}
+
+
+@mcp.tool()
+def resume_interrupted(dry_run: bool = False) -> dict:
+    """Finish the last input action that was interrupted (Escape, the owner
+    using the machine, or a bot challenge): the untyped rest of the text,
+    the drag from where it dropped, the wheel clicks not yet sent, the
+    click that never landed. dry_run lists the steps without doing them.
+    Refuses while the switches are still off; call input_control(resume,
+    owner_confirmed=True) first."""
+    entry = resume.last()
+    if not entry:
+        return {"ok": True, "resumed": False, "note": "nothing was interrupted"}
+    steps = resume.plan(entry)
+    if dry_run:
+        return {"ok": True, "resumed": False, "interrupted": entry, "steps": steps}
+    if owner_pause.blocked("click") or owner_pause.blocked("type_text"):
+        return owner_pause.refusal("resume_interrupted")
+    result = batch(steps, stop_on_error=True)
+    if result.get("ok"):
+        resume.clear()
+    return {"ok": result.get("ok", False), "resumed": result.get("ok", False),
+            "interrupted": entry, "steps": steps, "result": result}
+
+
+@mcp.tool()
+def hand_back(close_launched: bool = True, park: bool = True) -> dict:
+    """Leave the desk the way a person leaves it, and verify it.
+
+    Releases every key and button this server holds and everything the XTEST
+    devices still report as down (checked with the X server afterwards),
+    closes only the windows launch_app opened (WM_DELETE_WINDOW, so unsaved
+    work can prompt), moves the pointer back where the owner left it unless
+    he is using it, makes sure the screen is on, and reports what is still
+    not clean. Call it at the end of every session.
+    """
+    return handback.hand_back(close_launched_windows=close_launched, park=park)
+
+
+# ---- REMOTE ------------------------------------------------------------------
+# Another fleet machine's desktop, over one persistent ssh channel per host
+# (workman.remote): the remote runs its own wm.py verbs, so its own human
+# synthesis, pause switch and TCC grants apply. The ssh path is picked by the
+# fleet ladder (cable, LAN, Headscale, Cloudflare) on first connect.
+
+@mcp.tool()
+def remote(host: str, verb: str, args: list[str] | None = None,
+           timeout_s: float = 60.0) -> dict:
+    """Run one wm.py verb on another machine: windows | active | focus <q> |
+    click x y | type <text> | key <combo> | elements [app] | human on|off |
+    platform | pause status|resume|release | handoff | ping. host: mac-mini |
+    md | air | dgx | wind1. Same code both ends, one warm channel."""
+    try:
+        return _remote.call(host, verb, list(args or []), timeout=timeout_s)
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "host": host}
+
+
+@mcp.tool()
+def remote_screenshot(host: str, full: bool = False) -> list:
+    """Another machine's screen as an image plus meta (size, scale, blank
+    check), through the persistent channel."""
+    try:
+        meta, data = _remote.image(host, "shot", ["-", "full"] if full else ["-"])
+    except Exception as exc:
+        return [{"ok": False, "error": f"{type(exc).__name__}: {exc}", "host": host}]
+    if data is None:
+        return [meta]
+    fmt = "png" if data[:4] == b"\x89PNG" else "jpeg"
+    return [meta, Image(data=data, format=fmt)]
+
+
+@mcp.tool()
+def remote_status(host: str) -> dict:
+    """Is the channel to `host` up, which transport it took (cable, LAN,
+    tailnet, Cloudflare), the remote backend, and one measured round trip."""
+    try:
+        return _remote.status(host)
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "host": host}
+
+
 # ---- BATCH -----------------------------------------------------------------
 # Non-visual actions only: interleaving images inside one result is awkward for
 # most clients, and the point here is to cut round-trips on action sequences.
+# One shape does not fit: a step names its tool in the key "action", so a tool
+# that takes its own `action` argument cannot be reached through here at all.
+# window_tile is deliberately absent for that reason rather than listed and
+# broken; call it directly.
 _BATCH_OPS = {
     "click": click, "move": move, "hover": hover, "drag": drag, "scroll": scroll,
     "mouse_button": mouse_button, "type_text": type_text, "press_key": press_key,
@@ -902,6 +1329,7 @@ _BATCH_OPS = {
     "chrome_autoscroll_to_top": chrome_autoscroll_to_top,
     "workman_set_human_mode": workman_set_human_mode,
     "workman_get_human_mode": workman_get_human_mode,
+    "input_control": input_control, "hand_back": hand_back, "remote": remote,
 }
 
 
@@ -946,7 +1374,173 @@ def batch(actions: list[dict], stop_on_error: bool = True) -> dict:
             "requested": len(actions), "results": results}
 
 
+# --------------------------------------------------------------- human mode
+# Working the screen the way a person does: know the machine's own key chords
+# instead of clicking through menus, and put windows where a person would --
+# one task filling the screen, two side by side, three at the hard ceiling.
+
+
+@mcp.tool()
+def shortcut(action: str, app: str | None = None,
+             platform: str | None = None) -> dict:
+    """The native key chord for an action on this machine, in xdotool syntax.
+
+    Reach for this before clicking through a menu. `app` narrows to that app's
+    own bindings ('chrome', 'files', 'terminal', 'vscode'); `platform` overrides
+    detection ('darwin', 'linux', 'win32') to look up another machine's chord.
+
+    Never raises and never guesses. An action a platform genuinely has no chord
+    for comes back with keys=None plus a note saying what to do instead, and
+    with a `route` naming the tool that does the job. macOS window-halving is
+    the example: its chords are Globe(fn) plus an arrow, and macOS resolves fn
+    below the event tap, so a synthetic event arrives with the flag stripped
+    and nothing happens. Measured, so that it is not an excuse: posting Delete
+    (keycode 51) with kCGEventFlagMaskSecondaryFn set left the text untouched,
+    while plain ForwardDelete removed a character. Those rows therefore point
+    at window_tile, which drives the same feature through the Window > Move &
+    Resize menu. A misspelling comes back with suggestions.
+    """
+    return shortcuts.resolve(action, app=app, platform=platform)
+
+
+@mcp.tool()
+def shortcut_many(actions: list[str], app: str | None = None,
+                  platform: str | None = None) -> list[dict]:
+    """Resolve several chords in one round-trip. Same rules as `shortcut`."""
+    return shortcuts.lookup_many(actions, app=app, platform=platform)
+
+
+@mcp.tool()
+def shortcut_list(app: str | None = None, platform: str | None = None,
+                  group: str | None = None) -> list[dict]:
+    """Every action that has a chord here, for finding out what is available.
+
+    Filter with `group`: window, tabs, navigation, editing, text_motion, system,
+    app. Read this before deciding a task needs the mouse. Includes chords
+    harvested into the learned store for this app.
+    """
+    return shortcuts.list_actions(app=app, platform=platform, group=group)
+
+
+@mcp.tool()
+def shortcut_learn(app: str, force: bool = False) -> dict:
+    """Harvest an app's menu-bar keyboard shortcuts and store them forever.
+
+    Call on first use of an unfamiliar app (also runs automatically from
+    focus_window). macOS reads AX menu key equivalents; Linux/Windows return
+    a clear note until those harvesters land. Re-harvest is skipped for a week
+    unless force=True.
+    """
+    from . import learned_shortcuts
+    return learned_shortcuts.ensure_learned(app, force=force)
+
+
+@mcp.tool()
+def shortcut_learned(app: str | None = None,
+                     platform: str | None = None) -> dict:
+    """List durable learned chords (local + fleet mirrors)."""
+    from . import learned_shortcuts
+    rows = learned_shortcuts.list_for(app, platform)
+    return {
+        "ok": True,
+        "count": len(rows),
+        "path": str(learned_shortcuts.shortcuts_path()),
+        "shortcuts": rows,
+    }
+
+
+@mcp.tool()
+def cu_skill_recall(query: str, app: str = "", limit: int = 3) -> dict:
+    """Short taught skills. Returns {ok,n,lines}. Call before inventing clicks."""
+    from . import cu_memory, cu_skills
+    return cu_memory.from_skills(cu_skills.recall(query, app=app, limit=limit, compact=True))
+
+
+@mcp.tool()
+def cu_skill_teach(title: str, steps: list[dict] | str, app: str = "",
+                   platform: str = "", notes: str = "",
+                   source: str = "session") -> dict:
+    """Save one verified skill. steps=[{action,value}]. No secrets."""
+    from . import cu_skills
+    return cu_skills.teach(title, steps, app=app, platform=platform,
+                           notes=notes, source=source)
+
+
+@mcp.tool()
+def cu_memory(op: str, q: str = "", items: list[str] | None = None) -> dict:
+    """Tiny computer-use memory. Always {ok,op,n,lines}. Same shape for Qwen and frontier.
+
+    op: status | working | tick | recall | fact | forget | history | board
+    working: pass items=[...] checklist. tick: q=item text. fact: q='subj | pred | obj'.
+    recall: q=query (skills + valid facts). forget: q=fact id or text.
+    """
+    from . import cu_memory as mem
+    return mem.handle(op, q=q, items=items)
+
+
+@mcp.tool()
+def layout_focus(query: str, timeout_s: float = 6.0) -> dict:
+    """Bring a window forward and CONFIRM it is frontmost before you type.
+
+    Raising a window is a request, not a guarantee, so this polls the frontmost
+    window until it matches or the timeout passes. Typing into whatever happened
+    to be in front is the standard way this goes wrong, and `verified` in the
+    reply is what tells you it did not.
+    """
+    return workspace_layout.focus_and_verify(query, timeout_s=timeout_s)
+
+
+@mcp.tool()
+def layout_full(query: str | None = None, native: bool = False) -> dict:
+    """Give one window the whole working area -- the layout for a single task.
+
+    Fills the visible frame, so the menu bar and Dock are respected and the task
+    board stays reachable. `native=True` asks for real fullscreen instead, which
+    hides both and hides the board with them; leave it off unless the task is
+    watching video.
+    """
+    return workspace_layout.fullscreen(query, native=native)
+
+
+@mcp.tool()
+def layout_split(left: str, right: str, ratio: float = 0.5,
+                 display: int | str | None = None) -> dict:
+    """Two windows side by side -- the layout for comparing or referencing.
+
+    `ratio` is the left window's share (0.6 gives it three fifths). Geometry is
+    read back after the write rather than assumed: an app that enforces a
+    minimum size comes back honored=False with the per-window delta, because a
+    window that silently refused to shrink is something you need to know about.
+    """
+    return workspace_layout.split(left, right, ratio=ratio, display=display)
+
+
+@mcp.tool()
+def layout_stack(queries: list[str], display: int | str | None = None) -> dict:
+    """Up to three windows in equal columns. Three is a hard cap, not a default.
+
+    Narrower than a third of the working area stops being readable, which is the
+    same reason a person stops at three. A fourth window is refused rather than
+    squeezed in.
+    """
+    return workspace_layout.stack(queries, display=display)
+
+
+@mcp.tool()
+def layout_arrange(spec: dict) -> dict:
+    """Apply a layout from one spec: {"layout": "full"|"split"|"stack", ...}.
+
+    The declarative form of the three above -- describe the arrangement the task
+    needs and let it place the windows.
+    """
+    return workspace_layout.arrange(spec)
+
+
 def main() -> None:
+    # Human Mode is the default, not an opt-in. A session that forgets to turn
+    # it on drives a teleporting pointer across a screen someone is watching.
+    # WORKMAN_HUMAN_MODE=0 opts out.
+    human.apply_session_default()
     # Extension retries ws://127.0.0.1:8765/workman forever; be there on boot.
     # A bind failure must not take down the MCP server.
     try:

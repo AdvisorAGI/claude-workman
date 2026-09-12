@@ -21,6 +21,7 @@ list; without it the backend still sees (`screencapture`) and can act through
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -295,6 +296,33 @@ def active_window() -> dict:
             "x": 0, "y": 0, "w": 0, "h": 0}
 
 
+def focused_window_identity() -> dict | None:
+    """The frontmost app window's owner and title from one Quartz window-list
+    read; None without Quartz (an osascript per keystroke is far too slow)."""
+    if _quartz() is None:
+        return None
+    wins = list_windows()
+    if not wins:
+        return None
+    return {"ok": True, "class": wins[0].get("app") or "", "app": wins[0].get("app") or "",
+            "name": wins[0].get("title") or ""}
+
+
+def window_at_point(x: int, y: int) -> dict | None:
+    """Frontmost on-screen window whose frame contains (x, y), or None."""
+    for w in list_windows():
+        try:
+            wx, wy, ww, wh = (int(w.get(k) or 0) for k in ("x", "y", "w", "h"))
+        except (TypeError, ValueError):
+            continue
+        if ww <= 0 or wh <= 0:
+            continue
+        if wx <= x < wx + ww and wy <= y < wy + wh:
+            return {"ok": True, "class": w.get("app") or "", "app": w.get("app") or "",
+                    "name": w.get("title") or w.get("name") or ""}
+    return None
+
+
 def kill_window(query: str) -> dict:
     """Terminate the owning process, matching the Linux backend's semantics.
 
@@ -355,6 +383,46 @@ _SHIFTED = {"plus": "equal", "underscore": "minus", "colon": "semicolon",
             "braceleft": "bracketleft", "braceright": "bracketright",
             "less": "comma", "greater": "period", "bar": "backslash",
             "quotedbl": "quote", "asciitilde": "grave"}
+
+# Characters -> the US-layout key a person presses for them; True means a real
+# Shift key goes down around it, so a page sees shiftKey AND a Shift keydown.
+_US_PLAIN = {" ": "space", "-": "minus", "=": "equal", "[": "bracketleft",
+             "]": "bracketright", "\\": "backslash", ";": "semicolon",
+             "'": "apostrophe", "`": "grave", ",": "comma", ".": "period",
+             "/": "slash", "\t": "tab", "\n": "return", "\r": "return"}
+_US_SHIFT = {"~": "grave", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5",
+             "^": "6", "&": "7", "*": "8", "(": "9", ")": "0", "_": "minus",
+             "+": "equal", "{": "bracketleft", "}": "bracketright", "|": "backslash",
+             ":": "semicolon", '"': "apostrophe", "<": "comma", ">": "period",
+             "?": "slash"}
+US_CHARS: dict[str, tuple[int, bool]] = {
+    **{c: (_KEYCODES[c], False) for c in "abcdefghijklmnopqrstuvwxyz0123456789"},
+    **{c.upper(): (_KEYCODES[c], True) for c in "abcdefghijklmnopqrstuvwxyz"},
+    **{c: (_KEYCODES[n], False) for c, n in _US_PLAIN.items()},
+    **{c: (_KEYCODES[n], True) for c, n in _US_SHIFT.items()},
+}
+#: Longest a synthetic key may stay down, or a typing gap last (caller input).
+MAX_KEY_MS = 1000
+#: After pasting an off-layout character, wait this long then put the owner's
+#: clipboard back. A page's paste handler reads the clipboard asynchronously.
+PASTE_RESTORE_S = 0.3
+#: App names behind which a web page or an Electron shell sits: there a page
+#: can see how input arrived, so it must arrive as a person's would.
+BROWSER_APPS = frozenset({"chrome", "chromium", "safari", "arc", "brave", "edge",
+                          "firefox", "opera", "vivaldi", "orion", "electron", "claude",
+                          "cursor", "slack", "code", "discord"})
+
+
+def char_key(ch: str) -> tuple[int | None, bool]:
+    """(virtual keycode, needs Shift) for one character on a US layout, or
+    (None, False) when that layout has no key for it."""
+    return US_CHARS.get(ch, (None, False))
+
+
+def is_browser_app(name: str) -> bool:
+    """True when an app name is a browser, a WebKit shell or an Electron app."""
+    low = (name or "").lower()
+    return "webkit" in low or any(w in BROWSER_APPS for w in re.split(r"[^a-z0-9]+", low))
 
 
 def keycode_for(name: str) -> tuple[int | None, bool]:
@@ -576,20 +644,60 @@ def pointer_position() -> dict:
                             "install pyobjc or cliclick")
 
 
-def _post_key(code: int, down: bool, flags: int = 0) -> bool:
+def _ms(value) -> int:
+    """A caller's hold or gap in ms, bounded so no key stays down for long."""
+    try:
+        return max(0, min(int(value or 0), MAX_KEY_MS))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _post_key(code: int, down: bool, flags: int = 0, text: str | None = None) -> bool:
     Q = _quartz()
     if Q is None:
         return False
     ev = Q.CGEventCreateKeyboardEvent(None, code, down)
     if flags:
         Q.CGEventSetFlags(ev, flags)
+    if text:
+        # The characters a real event carries, so the text is right whatever
+        # the layout. The count is UTF-16 units: an emoji is two.
+        Q.CGEventKeyboardSetUnicodeString(ev, len(text.encode("utf-16-le")) // 2, text)
     Q.CGEventPost(Q.kCGHIDEventTap, ev)
     return True
 
 
-def press_key(key: str) -> dict:
+def _stroke(code: int, mods: list[str], hold_ms: int = 0, text: str | None = None) -> None:
+    """One keystroke as a person makes it: each modifier is a real key going
+    down first (not only a flag on the key), the key is held for hold_ms,
+    then everything comes back up in reverse, even when interrupted."""
+    held = 0
+    down: list[tuple[int, int]] = []
+    try:
+        for m in mods:
+            mcode = _MOD_KEYCODE.get(m)
+            if mcode is None or any(c == mcode for c, _ in down):
+                continue
+            held |= _CG_FLAGS.get(m, 0)
+            _post_key(mcode, True, held)
+            down.append((mcode, _CG_FLAGS.get(m, 0)))
+        _post_key(code, True, held, text)
+        try:
+            if hold_ms > 0:
+                time.sleep(hold_ms / 1000.0)
+        finally:
+            _post_key(code, False, held, text)
+    finally:
+        for mcode, bit in reversed(down):
+            held &= ~bit
+            _post_key(mcode, False, held)
+
+
+def press_key(key: str, hold_ms: int = 0) -> dict:
     """xdotool key syntax, translated: 'Return', 'ctrl+c', 'super+l', 'KP_0'.
-    `super` is Command here, so a model can write one combo for every OS."""
+    `super` is Command here, so a model can write one combo for every OS.
+    hold_ms keeps the key down that long (Human Mode's dwell), with real
+    modifier key events around it."""
     mods, name = base.split_combo(key)
     code, needs_shift = keycode_for(name)
     if code is None:
@@ -597,9 +705,8 @@ def press_key(key: str) -> dict:
                 "hint": "use xdotool names: Return, Tab, Escape, ctrl+c, super+space"}
     if needs_shift and "shift" not in mods:
         mods = mods + ["shift"]
-    flags = _flags_for(mods)
-    if _post_key(code, True, flags):
-        _post_key(code, False, flags)
+    if _quartz() is not None:
+        _stroke(code, mods, _ms(hold_ms))
         return {"ok": True, "key": key, "via": "quartz"}
     using = " using {" + ", ".join(
         {"super": "command down", "ctrl": "control down", "alt": "option down",
@@ -636,24 +743,73 @@ def key_up(key: str) -> dict:
                             "held keys need pyobjc-framework-Quartz")
 
 
-def type_text(text: str, delay_ms: int = 40) -> dict:
-    """Type a literal string.
+def release_all() -> dict:
+    """hand_back's release beyond the agent's tracked holds: on macOS that is
+    nothing, and the result says it cannot be verified."""
+    # XTEST keeps a per-device held state that can be queried and cleared.
+    # Quartz does not: posted and physical input share one state table, so a
+    # key-up for a modifier the agent never pressed can cancel one the owner
+    # is physically holding. hand_back has already released the tracked holds
+    # through key_up / mouse_up (Quartz) before it asks this.
+    return {"ok": True, "verified": None, "released_blind": False,
+            "note": "macOS: tracked holds released one by one; no per-source held "
+                    "state to verify against, so nothing is released blind"}
 
-    Quartz sends each character as a unicode payload rather than a keycode, so
-    the text is layout-independent: an accented character or an emoji arrives
-    intact on a keyboard that has no key for it.
+
+def _frontmost_is_browser() -> bool:
+    return is_browser_app((focused_window_identity() or {}).get("class") or "")
+
+
+def _paste(text: str, hold_ms: int = 0) -> dict:
+    """The way a person enters a character their keyboard has no key for."""
+    setres = clipboard_set(text=text)
+    if not setres.get("ok"):
+        return setres
+    return press_key("super+v", hold_ms=hold_ms)
+
+
+def type_text(text: str, delay_ms: int = 40, dwell_ms: int = 0) -> dict:
+    """Type a literal string as the keys a person presses for it.
+
+    Each character a US layout has is sent on its real virtual keycode, so a
+    page reads a real event.code, with a real Shift press around capitals and
+    shifted symbols; dwell_ms holds each key down, delay_ms is the gap after.
+    A character the layout lacks is pasted when a browser is in front (there
+    a bare unicode payload arrives with an empty event.code) and sent as a
+    unicode payload in a native app, where it arrives intact.
     """
+    # Fixed 2026-09-12: every character went out as a unicode payload on
+    # keycode 0: an empty event.code and no Shift on capitals, a page's tell.
     Q = _quartz()
     if Q is not None:
-        for ch in text:
-            ev = Q.CGEventCreateKeyboardEvent(None, 0, True)
-            Q.CGEventKeyboardSetUnicodeString(ev, len(ch), ch)
-            Q.CGEventPost(Q.kCGHIDEventTap, ev)
-            up = Q.CGEventCreateKeyboardEvent(None, 0, False)
-            Q.CGEventKeyboardSetUnicodeString(up, len(ch), ch)
-            Q.CGEventPost(Q.kCGHIDEventTap, up)
-            time.sleep(max(0, delay_ms) / 1000.0)
-        return {"ok": True, "typed_len": len(text), "via": "quartz"}
+        dwell, gap = _ms(dwell_ms), _ms(delay_ms)
+        browser: bool | None = None
+        saved = None
+        try:
+            for i, ch in enumerate(text):
+                code, shift = char_key(ch)
+                if code is not None:
+                    _stroke(code, ["shift"] if shift else [], dwell,
+                            ch if ch.isprintable() else None)
+                else:
+                    if browser is None:
+                        browser = _frontmost_is_browser()
+                    if browser:
+                        if saved is None:
+                            saved = clipboard_get()
+                        pasted = _paste(ch, dwell)
+                        if not pasted.get("ok"):
+                            return {"ok": False, "error": f"paste failed: {pasted.get('error')}",
+                                    "typed_len": i, "via": "quartz+paste"}
+                    else:
+                        _stroke(0, [], dwell, ch)
+                if gap:
+                    time.sleep(gap / 1000.0)
+            return {"ok": True, "typed_len": len(text), "via": "quartz"}
+        finally:
+            if saved is not None and saved.get("ok"):
+                time.sleep(PASTE_RESTORE_S)
+                clipboard_set(text=saved.get("text") or "")
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     res = _osa(f'tell application "System Events" to keystroke "{escaped}"')
     if res.returncode == 0:

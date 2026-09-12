@@ -108,17 +108,79 @@ def find(name: str, role: str | None = None, app: str | None = None) -> dict | N
     return None
 
 
+#: Toolkits and app names behind which a web page (or an Electron app) sits.
+#: Inside those, an AT-SPI action fires a click or input with no pointer or
+#: key events at all, which a page can see. So the tree is used to FIND the
+#: element and the real pointer and keyboard do the acting.
+BROWSER_TOOLKITS = ("chromium", "chrome", "gecko", "firefox", "electron", "webkit")
+BROWSER_APPS = ("chrome", "chromium", "firefox", "brave", "vivaldi", "opera",
+                "edge", "electron", "claude", "code", "slack", "discord")
+
+
+def _application_of(node):
+    """The Application accessible an element belongs to."""
+    try:
+        app = node.get_application()
+        if app is not None:
+            return app
+    except Exception:
+        pass
+    cur = node
+    for _ in range(64):
+        try:
+            parent = cur.get_parent()
+        except Exception:
+            return None
+        if parent is None:
+            return cur
+        cur = parent
+    return None
+
+
+def is_browser_element(node) -> bool:
+    """True when the element lives in a browser or Electron window."""
+    app = _application_of(node)
+    if app is None:
+        return False
+    try:
+        toolkit = (app.get_toolkit_name() or "").lower()
+    except Exception:
+        toolkit = ""
+    try:
+        name = (app.get_name() or "").lower()
+    except Exception:
+        name = ""
+    return any(t in toolkit for t in BROWSER_TOOLKITS) or any(a in name for a in BROWSER_APPS)
+
+
+def _human_click_info(info: dict) -> dict:
+    """Click an element's box with the real pointer (Human Mode aware)."""
+    from . import desktop, human
+    if human.enabled():
+        return human.human_click_element(info)
+    if info.get("w") and info.get("h"):
+        px, py = human.jitter_point(int(info["x"]), int(info["y"]),
+                                    int(info["w"]), int(info["h"]))
+    else:
+        px, py = int(info.get("cx", 0)), int(info.get("cy", 0))
+    out = desktop.click(px, py)
+    if isinstance(out, dict):
+        out["aimed"] = [px, py]
+    return out
+
+
 def click_element(name: str, role: str | None = None, app: str | None = None) -> dict:
-    """Find an element by role+name and click its center via xdotool."""
+    """Find an element by role+name and click inside its box with the real
+    pointer: a Gaussian point in the box, not the exact centre every time."""
     el = find(name, role=role, app=app)
     if not el:
         return {"ok": False, "error": f"no element name~={name!r} role={role} app={app}"}
-    from . import human, x11
-    if human.enabled():
-        human.human_click(el["cx"], el["cy"])
-    else:
-        x11.click(el["cx"], el["cy"])
-    return {"ok": True, "clicked": el}
+    result = _human_click_info(el)
+    if isinstance(result, dict) and result.get("ok") is False:
+        out = dict(result)
+        out["element"] = el
+        return out
+    return {"ok": True, "clicked": el, "aimed": (result or {}).get("aimed")}
 
 
 # ---- acting THROUGH the tree instead of at pixels ---------------------------
@@ -217,6 +279,16 @@ def perform_action(name: str, action: str = "click", role: str | None = None,
     node, info = find_node(name, role=role, app=app)
     if node is None:
         return {"ok": False, "error": f"no element name~={name!r} role={role} app={app}"}
+    if is_browser_element(node):
+        # In a page, do_action is a click with no pointer events: a tell.
+        # The tree found the element; the real pointer presses it.
+        result = _human_click_info(info)
+        if isinstance(result, dict) and result.get("ok") is False:
+            out = dict(result)
+            out.update({"element": info, "via": "pointer"})
+            return out
+        return {"ok": True, "performed": action, "via": "pointer", "element": info,
+                "aimed": (result or {}).get("aimed")}
     try:
         iface = node.get_action_iface()
         if iface is None:
@@ -226,7 +298,7 @@ def perform_action(name: str, action: str = "click", role: str | None = None,
         for index, candidate in enumerate(available):
             if (candidate or "").lower() == wanted:
                 iface.do_action(index)
-                return {"ok": True, "performed": candidate, "element": info}
+                return {"ok": True, "performed": candidate, "via": "atspi", "element": info}
         return {"ok": False, "error": f"action {action!r} not declared",
                 "available": available, "element": info}
     except Exception as exc:
@@ -243,6 +315,8 @@ def set_value(name: str, value: str, role: str | None = None,
     node, info = find_node(name, role=role, app=app)
     if node is None:
         return {"ok": False, "error": f"no element name~={name!r} role={role} app={app}"}
+    if is_browser_element(node):
+        return _type_into_browser_field(info, value)
     try:
         editable = node.get_editable_text_iface()
         if editable is not None:
@@ -258,6 +332,35 @@ def set_value(name: str, value: str, role: str | None = None,
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "element": info}
     return {"ok": False, "error": "element is not editable", "element": info}
+
+
+def _type_into_browser_field(info: dict, value: str) -> dict:
+    """Set a page field the way a person does: click into it, select all
+    with the keyboard, type the new value with human cadence. Setting the
+    text through AT-SPI would fire an input event with no keys behind it."""
+    from . import desktop, human
+    clicked = _human_click_info(info)
+    if isinstance(clicked, dict) and clicked.get("ok") is False:
+        out = dict(clicked)
+        out.update({"element": info, "via": "pointer+keys", "stage": "focus"})
+        return out
+    time.sleep(0.12)
+    sel = desktop.press_key("ctrl+a")
+    if isinstance(sel, dict) and sel.get("ok") is False:
+        out = dict(sel)
+        out.update({"element": info, "via": "pointer+keys", "stage": "select_all"})
+        return out
+    time.sleep(0.08)
+    if human.enabled():
+        typed = human.human_type(value, typos=False)
+    else:
+        typed = desktop.type_text(value)
+    if isinstance(typed, dict) and typed.get("ok") is False:
+        out = dict(typed)
+        out.update({"element": info, "via": "pointer+keys", "stage": "type"})
+        return out
+    return {"ok": True, "set": len(value), "via": "pointer+keys", "element": info,
+            "aimed": (clicked or {}).get("aimed")}
 
 
 def focused_element() -> dict:

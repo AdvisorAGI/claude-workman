@@ -17,7 +17,7 @@ from __future__ import annotations
 
 import time
 
-from . import base
+from . import base, darwin
 
 PLATFORM = "macOS"
 
@@ -232,27 +232,68 @@ def find(name: str, role: str | None = None, app: str | None = None) -> dict | N
     return described
 
 
+def is_web_element(element, app_name: str = "") -> bool:
+    """True when an element sits in a browser, a WebKit view or an Electron
+    app, where an AX action is a click or input with no events behind it."""
+    if darwin.is_browser_app(app_name):
+        return True
+    api = _api()
+    node = element
+    for _ in range(64):
+        if node is None:
+            return False
+        if str(_attr(node, api.kAXRoleAttribute) or "") == "AXWebArea":
+            return True
+        node = _attr(node, api.kAXParentAttribute)
+    return False
+
+
+def _pointer_click(info: dict) -> dict:
+    """Click inside an element's frame with the real pointer (Human Mode
+    aware): a Gaussian point in the box, not its exact centre."""
+    from .. import desktop, human
+    try:
+        x, y, w, h = (int(info.get(k) or 0) for k in ("x", "y", "w", "h"))
+    except (TypeError, ValueError):
+        w = h = 0
+    if w <= 0 or h <= 0:
+        return {"ok": False, "error": "element has no on-screen frame to click"}
+    if human.enabled():
+        return human.human_click_element({"x": x, "y": y, "w": w, "h": h})
+    px, py = human.jitter_point(x, y, w, h)
+    out = desktop.click(px, py)
+    if isinstance(out, dict):
+        out["aimed"] = [px, py]
+    return out
+
+
+def _by_pointer(described: dict, result, **extra) -> dict:
+    if isinstance(result, dict) and result.get("ok") is False:
+        out = dict(result)
+        out.update({"element": described, "via": "pointer", **extra})
+        return out
+    return {"ok": True, "element": described, "via": "pointer",
+            "aimed": (result or {}).get("aimed"), **extra}
+
+
 def click_element(name: str, role: str | None = None,
                   app: str | None = None) -> dict:
-    """Press an element by name. AXPress first, a real click on its centre if
-    the element offers no press action."""
+    """Press an element by name. In a browser or Electron app the AX tree only
+    FINDS it and the real pointer clicks inside its frame; a native app gets
+    AXPress, then a pointer click when it offers no press action."""
     element, described = find_node(name, role=role, app=app)
     if element is None:
         state = available()
         return ({"ok": False, "error": state["error"], "unsupported": True}
                 if not state["ok"] else
                 {"ok": False, "error": f"no element named {name!r}"})
+    if is_web_element(element, described.get("app", "")):
+        return _by_pointer(described, _pointer_click(described))
     api = _api()
     err = api.AXUIElementPerformAction(element, api.kAXPressAction)
     if err == 0:
         return {"ok": True, "element": described, "via": "AXPress"}
-    from . import darwin
-
-    cx, cy = described["center"]
-    result = darwin.click(cx, cy)
-    result["element"] = described
-    result["via"] = "click on element centre"
-    return result
+    return _by_pointer(described, _pointer_click(described))
 
 
 def element_actions(name: str, role: str | None = None,
@@ -271,6 +312,9 @@ def perform_action(name: str, action: str = "click", role: str | None = None,
     element, described = find_node(name, role=role, app=app)
     if element is None:
         return {"ok": False, "error": f"no element named {name!r}"}
+    if is_web_element(element, described.get("app", "")):
+        # In a page an AX action is a click with no pointer events: a tell.
+        return _by_pointer(described, _pointer_click(described), performed=action)
     api = _api()
     ax_action = action if action.startswith("AX") else {
         "click": "AXPress", "press": "AXPress", "open": "AXPress",
@@ -286,11 +330,14 @@ def perform_action(name: str, action: str = "click", role: str | None = None,
 
 def set_value(name: str, value: str, role: str | None = None,
               app: str | None = None) -> dict:
-    """Set a field's contents directly — no keystrokes, so nothing can be eaten
-    by an autocomplete dropdown mid-word."""
+    """Set a field's contents. A native app's field is written directly (no
+    keystrokes, so nothing can be eaten by an autocomplete dropdown mid-word);
+    a page field is clicked, selected with Cmd+A and typed into."""
     element, described = find_node(name, role=role, app=app)
     if element is None:
         return {"ok": False, "error": f"no element named {name!r}"}
+    if is_web_element(element, described.get("app", "")):
+        return _type_into_web_field(described, value)
     api = _api()
     err = api.AXUIElementSetAttributeValue(element, api.kAXValueAttribute, value)
     if err != 0:
@@ -298,6 +345,27 @@ def set_value(name: str, value: str, role: str | None = None,
                 "element": described,
                 "hint": "the field may be read-only; try click_element then type_text"}
     return {"ok": True, "element": described, "set_len": len(value)}
+
+
+def _type_into_web_field(info: dict, value: str) -> dict:
+    """Set a page field the way a person does: click into it, select all with
+    Cmd+A, type the value with human cadence. Writing AXValue would fire an
+    input event with no keys behind it."""
+    from .. import desktop, human
+    clicked = _pointer_click(info)
+    if isinstance(clicked, dict) and clicked.get("ok") is False:
+        return {**clicked, "element": info, "via": "pointer+keys", "stage": "focus"}
+    time.sleep(0.12)
+    sel = (desktop.press_key("super+a", hold_ms=human.key_dwell_ms()) if human.enabled()
+           else desktop.press_key("super+a"))
+    if isinstance(sel, dict) and sel.get("ok") is False:
+        return {**sel, "element": info, "via": "pointer+keys", "stage": "select_all"}
+    time.sleep(0.08)
+    typed = human.human_type(value, typos=False) if human.enabled() else desktop.type_text(value)
+    if isinstance(typed, dict) and typed.get("ok") is False:
+        return {**typed, "element": info, "via": "pointer+keys", "stage": "type"}
+    return {"ok": True, "element": info, "set_len": len(value), "via": "pointer+keys",
+            "aimed": (clicked or {}).get("aimed")}
 
 
 def focused_element() -> dict:
