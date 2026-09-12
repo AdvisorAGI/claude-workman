@@ -13,7 +13,6 @@ import time
 import pytest
 
 from workman import desktop, owner_pause
-from workman.platform import linux_x11
 
 
 def _age_stamp(name: str, seconds: float) -> None:
@@ -78,10 +77,11 @@ class TestSafeFacade:
     def quick(self, monkeypatch):
         monkeypatch.setattr(owner_pause, "HUMAN_YIELD_S", 0.05)
         moved = []
-        monkeypatch.setattr(linux_x11, "move", lambda x, y: moved.append((x, y)) or {"ok": True})
-        monkeypatch.setattr(linux_x11, "mouse_up",
+        backend = desktop.active()
+        monkeypatch.setattr(backend, "move", lambda x, y: moved.append((x, y)) or {"ok": True})
+        monkeypatch.setattr(backend, "mouse_up",
                             lambda button=1, x=None, y=None: moved.append(("up", button)) or {"ok": True})
-        monkeypatch.setattr(linux_x11, "foreign_pointer_motion", lambda: False)
+        monkeypatch.setattr(backend, "foreign_pointer_motion", lambda: False)
         return moved
 
     def test_input_refused_while_owner_is_active(self, quick):
@@ -96,7 +96,7 @@ class TestSafeFacade:
         assert quick == [(5, 5)]
 
     def test_foreign_pointer_motion_counts_as_the_owner(self, quick, monkeypatch):
-        monkeypatch.setattr(linux_x11, "foreign_pointer_motion", lambda: True)
+        monkeypatch.setattr(desktop.active(), "foreign_pointer_motion", lambda: True)
         out = desktop.move(5, 5)
         assert out["ok"] is False and out["error"] == "human_active"
         assert owner_pause.human_active() is True

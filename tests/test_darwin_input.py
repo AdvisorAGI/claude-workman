@@ -10,16 +10,30 @@ from workman.platform import darwin
 SHIFT, CMD, CTRL = 56, 55, 59
 
 
+class _Point:
+    def __init__(self, x=0.0, y=0.0):
+        self.x, self.y = float(x), float(y)
+
+
 class FakeQuartz:
     kCGHIDEventTap = "tap"
     kCGWindowListOptionOnScreenOnly = 1
     kCGWindowListExcludeDesktopElements = 16
     kCGNullWindowID = 0
+    kCGEventMouseMoved = "moved"
+    kCGEventLeftMouseDown = "ldown"
+    kCGEventLeftMouseUp = "lup"
+    kCGEventRightMouseDown = "rdown"
+    kCGEventRightMouseUp = "rup"
+    kCGEventOtherMouseDown = "odown"
+    kCGEventOtherMouseUp = "oup"
+    kCGMouseEventClickState = "click_state"
 
     def __init__(self):
         self.posted: list[dict] = []
         self.windows: list[dict] = []
         self.sleeps: list[float] = []
+        self.pointer = _Point(0, 0)
 
     def CGEventCreateKeyboardEvent(self, src, code, down):
         return {"code": code, "down": bool(down), "flags": 0, "text": None}
@@ -30,11 +44,37 @@ class FakeQuartz:
     def CGEventKeyboardSetUnicodeString(self, ev, n, text):
         ev["text"], ev["n"] = text, n
 
+    def CGPointMake(self, x, y):
+        return _Point(x, y)
+
+    def CGEventCreateMouseEvent(self, src, event_type, point, button):
+        return {"type": event_type, "point": point, "button": button, "flags": 0}
+
+    def CGEventSetIntegerValueField(self, ev, field, value):
+        ev[field] = value
+
+    def CGEventCreate(self, src):
+        return {"current": True}
+
+    def CGEventGetLocation(self, ev):
+        return self.pointer
+
     def CGEventPost(self, tap, ev):
         self.posted.append(ev)
+        if ev.get("point") is not None:
+            self.pointer = ev["point"]
 
     def CGWindowListCopyWindowInfo(self, opts, wid):
         return list(self.windows)
+
+    def CGMainDisplayID(self):
+        return 1
+
+    def CGDisplayBounds(self, did):
+        class Bounds:
+            origin = type("O", (), {"x": 0, "y": 0})()
+            size = type("S", (), {"width": 1440, "height": 900})()
+        return Bounds()
 
 
 def front(app: str, title: str = "") -> dict:
@@ -52,6 +92,7 @@ def mac(monkeypatch):
     monkeypatch.setattr(darwin, "_quartz_mod", q)
     monkeypatch.setattr(darwin, "_quartz_tried", True)
     monkeypatch.setattr(darwin.time, "sleep", q.sleeps.append)
+    darwin._LAST_PLACED["at"] = None
     return q
 
 
@@ -181,3 +222,28 @@ class TestFrontmost:
         assert desktop.is_remote_viewer(viewer) is True
         assert desktop.is_remote_viewer(local) is False
         assert darwin.window_at_point(900, 900) is None
+
+
+class TestForeignPointerMotion:
+    def test_quiet_when_pointer_is_where_the_agent_left_it(self, mac):
+        assert darwin.move(40, 50)["ok"] is True
+        assert darwin.foreign_pointer_motion() is False
+
+    def test_owner_motion_is_foreign_then_latches(self, mac):
+        darwin.move(40, 50)
+        mac.pointer = _Point(200, 200)
+        assert darwin.foreign_pointer_motion() is True
+        assert darwin.foreign_pointer_motion() is False
+
+    def test_unknown_without_a_prior_place(self, mac):
+        mac.pointer = _Point(9, 9)
+        assert darwin.foreign_pointer_motion() is False
+
+    def test_unknown_without_quartz(self, monkeypatch):
+        monkeypatch.setattr(darwin, "_quartz_mod", None)
+        monkeypatch.setattr(darwin, "_quartz_tried", True)
+        darwin._LAST_PLACED["at"] = (1, 1)
+        assert darwin.foreign_pointer_motion() is False
+
+    def test_platform_info_names_quartz_when_loaded(self, mac):
+        assert darwin.platform_info()["input_channel"] == "quartz"

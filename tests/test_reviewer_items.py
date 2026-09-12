@@ -149,8 +149,13 @@ class TestPlatformReport:
     def test_workman_platform_reports_pause_listener_and_cdp(self, monkeypatch):
         monkeypatch.setattr(server, "_port_open", lambda port, host="127.0.0.1", timeout=0.1: False)
         monkeypatch.setattr(server.esc_pause, "listener_pid", lambda: 4321)
+        monkeypatch.setattr(server.desktop, "platform_info",
+                            lambda: {"backend": "test", "modifier_super": "Super",
+                                     "input_channel": "stub"})
+        monkeypatch.setattr(server.a11y, "backend_name", lambda: "test-a11y")
         info = server.workman_platform()
         assert info["esc_listener_pid"] == 4321
         assert info["owner_pause"]["input_switches"] == {"mouse": True, "keyboard": True}
         assert info["chrome_cdp"] == {"enabled": False, "port_listening": False}
-        assert info["input_channel"] in ("xtest", "xdotool")
+        assert info["input_channel"] == "stub"
+        assert info["accessibility"] == "test-a11y"

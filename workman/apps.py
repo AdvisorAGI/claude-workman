@@ -159,6 +159,8 @@ def _command_for(pid: str) -> str:
 def _bundle_argv(argv: list[str]) -> list[str] | None:
     """Turn an app *name* into a launchable argv on macOS and Windows."""
     if IS_MAC:
+        if not _mac_app_installed(argv[0]):
+            return None
         return ["open", "-a", argv[0]] + (["--args", *argv[1:]] if len(argv) > 1 else [])
     if IS_WINDOWS:
         match = next((a for a in list_launchable(argv[0], limit=1)), None)
@@ -221,24 +223,70 @@ def _parse_desktop(path: str) -> dict:
     return fields
 
 
+def _iter_mac_bundles():
+    """Yield (bundle name without .app, path) for visible .app bundles.
+
+    Scans each MAC_APP_DIRS entry and one nested level (Utilities, Chrome Apps).
+    Dot-prefixed bundles are helper apps, not something to launch.
+    """
+    for directory in MAC_APP_DIRS:
+        if not os.path.isdir(directory):
+            continue
+        try:
+            entries = sorted(os.listdir(directory))
+        except OSError:
+            continue
+        for entry in entries:
+            path = os.path.join(directory, entry)
+            if entry.endswith(".app"):
+                if not entry.startswith(".") and os.path.isdir(path):
+                    yield entry[:-4], path
+                continue
+            if entry.startswith(".") or not os.path.isdir(path):
+                continue
+            try:
+                inner = sorted(os.listdir(path))
+            except OSError:
+                continue
+            for child in inner:
+                child_path = os.path.join(path, child)
+                if child.endswith(".app") and not child.startswith(".") and os.path.isdir(child_path):
+                    yield child[:-4], child_path
+
+
+def _mac_app_installed(name: str) -> bool:
+    """True when `name` is an installed .app (bare name, .app suffix, or path)."""
+    raw = (name or "").strip()
+    if not raw:
+        return False
+    stripped = raw.rstrip("/\\")
+    base = os.path.basename(stripped)
+    if base.endswith(".app"):
+        stem = base[:-4]
+        if stem.startswith("."):
+            return False
+        if os.path.isdir(stripped):
+            return True
+        want = stem
+    else:
+        if raw.startswith("."):
+            return False
+        want = raw
+    want_l = want.lower()
+    return any(n.lower() == want_l for n, _p in _iter_mac_bundles())
+
+
 def _list_mac_apps(query: str = "", limit: int = 60) -> list[dict]:
     """Installed .app bundles. `exec` is the bundle name because that is what
     `open -a` wants, not the binary inside Contents/MacOS."""
     needle = query.lower().strip()
     found: list[dict] = []
-    for directory in MAC_APP_DIRS:
-        if not os.path.isdir(directory):
+    for name, bundle in _iter_mac_bundles():
+        if needle and needle not in name.lower():
             continue
-        for entry in sorted(os.listdir(directory)):
-            if not entry.endswith(".app"):
-                continue
-            name = entry[:-4]
-            if needle and needle not in name.lower():
-                continue
-            found.append({"name": name, "exec": name,
-                          "bundle": os.path.join(directory, entry)})
-            if len(found) >= limit:
-                return found
+        found.append({"name": name, "exec": name, "bundle": bundle})
+        if len(found) >= limit:
+            return found
     return found
 
 

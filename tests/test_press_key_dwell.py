@@ -3,22 +3,22 @@ from __future__ import annotations
 
 import pytest
 
-from workman import desktop, human, server, x11
+from workman import desktop, human, server
 
 
 class FakeChannel:
     def __init__(self):
         self.combos: list[dict] = []
 
-    def press_combo(self, combo: str, hold_ms: int = 0):
-        self.combos.append({"combo": combo, "hold_ms": hold_ms})
-        return [combo]
+    def press_key(self, key: str, hold_ms: int = 0):
+        self.combos.append({"combo": key, "hold_ms": hold_ms})
+        return {"ok": True, "key": key}
 
 
 @pytest.fixture
 def channel(monkeypatch):
     ch = FakeChannel()
-    monkeypatch.setattr(x11, "_xt", lambda: ch)
+    monkeypatch.setattr(desktop.active(), "press_key", ch.press_key)
     monkeypatch.setattr(desktop, "_ACCEPTS", {})
     monkeypatch.setattr(server.time, "sleep", lambda s: None)
     human.reset()

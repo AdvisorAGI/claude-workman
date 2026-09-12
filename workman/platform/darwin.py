@@ -447,6 +447,35 @@ def _flags_for(mods: list[str]) -> int:
     return value
 
 
+# Where this process last put the pointer. Quartz posts and physical motion
+# share one cursor, so the tell that the owner moved the mouse is the pointer
+# not being where the agent left it.
+_LAST_PLACED: dict = {"at": None}
+FOREIGN_MOTION_PX = 3
+
+
+def _placed(x: int, y: int) -> None:
+    _LAST_PLACED["at"] = (int(x), int(y))
+
+
+def foreign_pointer_motion(tolerance: int = FOREIGN_MOTION_PX) -> bool:
+    """True when the pointer moved since the agent last placed it: somebody
+    else has the mouse. One CGEventGetLocation; nothing is polled."""
+    Q = _quartz()
+    at = _LAST_PLACED["at"]
+    if Q is None or at is None:
+        return False
+    try:
+        loc = Q.CGEventGetLocation(Q.CGEventCreate(None))
+        px, py = int(loc.x), int(loc.y)
+    except Exception:
+        return False
+    if abs(px - at[0]) > tolerance or abs(py - at[1]) > tolerance:
+        _LAST_PLACED["at"] = None
+        return True
+    return False
+
+
 def _post_mouse(kind: str, x: int, y: int, button: int = 1, clicks: int = 1,
                 flags: int = 0) -> bool:
     Q = _quartz()
@@ -470,12 +499,15 @@ def _post_mouse(kind: str, x: int, y: int, button: int = 1, clicks: int = 1,
 
     if kind == "move":
         post(Q.kCGEventMouseMoved)
+        _placed(x, y)
         return True
     if kind == "down":
         post(down, 1)
+        _placed(x, y)
         return True
     if kind == "up":
         post(up, 1)
+        _placed(x, y)
         return True
     post(Q.kCGEventMouseMoved)
     for n in range(1, max(1, clicks) + 1):
@@ -483,6 +515,7 @@ def _post_mouse(kind: str, x: int, y: int, button: int = 1, clicks: int = 1,
         # two singles; macOS reads it from the event, not from the timing.
         post(down, n)
         post(up, n)
+    _placed(x, y)
     return True
 
 
@@ -492,6 +525,7 @@ def move(x: int, y: int) -> dict:
         return {"ok": True, "at": [x, y], "via": "quartz"}
     if _has("cliclick"):
         _run(["cliclick", f"m:{x},{y}"])
+        _placed(x, y)
         return {"ok": True, "at": [x, y], "via": "cliclick"}
     return base.unsupported("pointer move", PLATFORM,
                             "install pyobjc (pip install pyobjc-framework-Quartz) "
@@ -507,6 +541,7 @@ def click(x: int, y: int, button: int = 1, count: int = 1) -> dict:
         verb = {1: "c", 2: "tc", 3: "rc"}.get(button, "c")
         for _ in range(max(1, count)):
             _run(["cliclick", f"{verb}:{x},{y}"])
+        _placed(x, y)
         return {"ok": True, "clicked": [x, y], "button": button, "count": count,
                 "via": "cliclick"}
     res = _osa(f'tell application "System Events" to click at {{{x}, {y}}}')
@@ -540,6 +575,7 @@ def click_with(x: int, y: int, button: int = 1, count: int = 1,
                          "meta": "cmd"}[m] for m in mods)
         verb = {1: "c", 2: "tc", 3: "rc"}.get(button, "c")
         _run(["cliclick", f"kd:{keys}", f"{verb}:{x},{y}", f"ku:{keys}"])
+        _placed(x, y)
         return {"ok": True, "clicked": [x, y], "button": button, "count": count,
                 "modifiers": mods, "via": "cliclick"}
     return base.unsupported("modifier-qualified click", PLATFORM,
@@ -557,6 +593,7 @@ def mouse_down(button: int = 1, x: int | None = None, y: int | None = None) -> d
         return {"ok": True, "held": button, "at": [x, y], "via": "quartz"}
     if _has("cliclick"):
         _run(["cliclick", f"dd:{x},{y}"])
+        _placed(x, y)
         return {"ok": True, "held": button, "at": [x, y], "via": "cliclick"}
     return base.unsupported("mouse_down", PLATFORM, "install pyobjc or cliclick")
 
@@ -569,6 +606,7 @@ def mouse_up(button: int = 1, x: int | None = None, y: int | None = None) -> dic
         return {"ok": True, "released": button, "via": "quartz"}
     if _has("cliclick"):
         _run(["cliclick", f"du:{x},{y}"])
+        _placed(x, y)
         return {"ok": True, "released": button, "via": "cliclick"}
     return base.unsupported("mouse_up", PLATFORM, "install pyobjc or cliclick")
 
@@ -594,6 +632,7 @@ def drag(from_x: int, from_y: int, to_x: int, to_y: int) -> dict:
                 "via": "quartz"}
     if _has("cliclick"):
         _run(["cliclick", f"dd:{from_x},{from_y}", f"du:{to_x},{to_y}"])
+        _placed(to_x, to_y)
         return {"ok": True, "from": [from_x, from_y], "to": [to_x, to_y],
                 "via": "cliclick"}
     return base.unsupported("drag", PLATFORM, "install pyobjc or cliclick")
@@ -833,8 +872,7 @@ def clipboard_set(text: str = "", selection: str = "clipboard") -> dict:
     if selection == "primary":
         return {"ok": False, "error": "macOS has no PRIMARY selection",
                 "hint": "use selection='clipboard'"}
-    res = subprocess.run(["pbcopy"], input=text, text=True, capture_output=True,
-                         timeout=20)
+    res = _run(["pbcopy"], input=text)
     if res.returncode != 0:
         return {"ok": False, "error": res.stderr.strip() or "pbcopy failed"}
     return {"ok": True, "set_len": len(text), "selection": "clipboard"}
@@ -963,6 +1001,8 @@ def platform_info() -> dict:
         "quartz": _quartz() is not None,
         "tools": {name: _has(name) for name in
                   ("screencapture", "osascript", "sips", "cliclick", "pbcopy")},
+        "input_channel": ("quartz" if _quartz() is not None else
+                          "cliclick" if _has("cliclick") else "osascript"),
         "modifier_super": "Command",
         "permissions": {
             "screen_recording": "System Settings > Privacy & Security > Screen Recording",

@@ -798,6 +798,7 @@ def platform_info() -> dict:
     info = {
         "backend": "win32",
         "os": "windows",
+        "input_channel": "sendinput",
         "modifier_super": "Win",
         "contract": list(base.CONTRACT),
         "notes": ("Coordinates are relative to the virtual desktop's top-left, "

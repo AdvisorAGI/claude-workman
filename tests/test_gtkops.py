@@ -7,6 +7,7 @@ a false success.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 
 from workman import gtkops
@@ -67,7 +68,8 @@ class TestCall:
                             FakeCompleted(json.dumps({"ok": True})))
         gtkops.call("windows")
         assert captured["cmd"][1:3] == ["-m", "workman.gtkops"]
-        assert "workman" in captured["env"]["PYTHONPATH"]
+        pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(gtkops.__file__)))
+        assert pkg_parent in captured["env"]["PYTHONPATH"].split(os.pathsep)
 
 
 class TestCliDispatch:
