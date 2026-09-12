@@ -11,9 +11,11 @@ State at hand-off:
   - Never more than 10 agents.
 
 ## 1. Push (if it did not go through)
-GitHub has been unreachable from the DGX all day (TCP timeouts), and that also stalls AdvisorPPC
-autodeploy. Push branch `codex/workman-fleet-v1.1` to remote `advisoragi`
-(AdvisorAGI/claude-workman) once `curl -m 10 https://github.com` answers. Never push to `atmos`.
+DONE 2026-09-12. GitHub is still unreachable from the home LAN, so pushes go through an ssh SOCKS
+tunnel to `hetzner` (`ssh -f -N -D 127.0.0.1:1089 hetzner`, then
+`git -c http.proxy=socks5h://127.0.0.1:1089 push ...`). Branch `codex/workman-fleet-v1.1` is on
+both `advisoragi` and `atmos` (atmosphere-ai/claude-atmos-workman, as its own branch by owner
+order). Never MERGE `atmos` into this checkout.
 
 ## 2. L2 live check on the DGX `:0`
 Run the typing and hand_back check (handoff L2) when Remmina is NOT the focused window. The new
@@ -23,7 +25,20 @@ Acceptance:
 - The zenity window is gone.
 - `agent_held` is empty.
 
+DONE 2026-09-12. The first run FAILED: the text went into the GNOME Activities search while EWMH
+still named zenity. c0e0a3d fixed it (shell_guard, real-window focus wait, persisted launches).
+Re-run in one process: the text landed in zenity, and hand_back returned `clean: true` with all
+five checks true. It closed both zenity windows and did not park the pointer
+(`remote_viewer_focused`). What opened the overview is still unknown: it was not the hot corner
+(off) and not found in the code.
+
 ## 3. Mac daemon parity (project, on the mac-mini)
+BUILT, awaiting verify and the owner-window restart. The build clone is `~/wt-mac-daemon-parity`,
+branch `feat/mac-daemon-parity`: wave A (Opus) is f3b1c06/5865a69/299e0e0, wave B (Grok) is
+271591f, and the plan is `computer-mcp/ADVISOR-PLAN-20260912.md`. The mini suite (guarded
+scratch copy) shows 288 passed, 21 skipped. To load it: `launchctl kickstart -k
+gui/$(id -u)/ai.atmosphere.workman` in an owner-agreed window, then a live Escape check.
+
 The mini is driven through the Workman.app daemon (`~/src/claude-atmos-workman/computer-mcp`,
 `atmos_computer`), which holds the TCC grants. The owner chose no permission toggles. That repo
 has ANOTHER session's uncommitted edits in daemon.py, keys.py, motion.py and ops.py: coordinate
@@ -48,7 +63,7 @@ before editing, or build in a worktree.
   copy, so this is only for local use there.
 
 ## 5. Small leftovers
-- `/tmp/l1_harness.py` should move into `scripts/` as a proper L1 harness (Xvfb :99 only).
+- DONE: the L1 harness is `scripts/l1_harness.py` (Xvfb :99 only).
 - Remote viewer guard: pointer MOVES that cross an unfocused viewer are not checked (accepted, lite).
 - A window opened after `launch_app` returns is never closed by hand_back (fails safe).
 
