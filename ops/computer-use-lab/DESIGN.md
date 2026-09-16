@@ -34,15 +34,15 @@ export PATH=$HOME/dgx-ai-lab/bin:$PATH
 Yellow fetch uses `dgxlab run -z yellow`. Red verify uses `dgxlab run -z red`.
 Propose stays on the host green audit chain (same rule as nightly-research).
 
-## Daily 2PM tuner (DGX only)
+## Daily 5AM tuner (DGX only)
 
-One session per day at 14:00 Asia/Dhaka. It **does** a real desktop task on this
+One session per day at 05:00 Asia/Dhaka. It **does** a real desktop task on this
 box, remembers a verified win, then stops.
 
 | Rule | Meaning |
 |---|---|
-| 30 minutes is a **ceiling**, not a quota | Stop as soon as the one task is done. Do not fill the slot. |
-| One task, finish it | No second task. SIGTERM at 30 min so in-flight work can land; short grace, then SIGKILL. |
+| 15 minutes is a **ceiling**, not a quota | Stop as soon as the one task is done. Do not fill the slot. |
+| One task, finish it | No second task. SIGTERM at 15 min so in-flight work can land; short grace, then SIGKILL. |
 | Skip if nothing to learn | If every task already has a skill and a recent success, spend **no seat**. |
 | Recheck is cheap | A stale skill is replayed by Grok/Qwen for a few minutes, not Fable. |
 | Learn uses the owner ladder | Fable, else ChatGPT Astra (Codex), else Grok 4.6, else Cursor, else Qwen. |
@@ -55,7 +55,7 @@ systemctl --user list-timers cu-tune.timer
 # halt: touch ~/ops/computer-use-lab/STOP
 ```
 
-Caps: `CU_TUNE_MAX_SEC=1800`, `CU_TUNE_GRACE_SEC=300`, recheck `CU_TUNE_RECHECK_SEC=480`.
+Caps: `CU_TUNE_MAX_SEC=900`, `CU_TUNE_GRACE_SEC=60`, recheck `CU_TUNE_RECHECK_SEC=480`.
 
 ## Files
 

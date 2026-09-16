@@ -1,9 +1,9 @@
 [Unit]
-Description=Workman computer-use daily tune (30 min max, skip if nothing to learn)
+Description=Workman computer-use daily tune (15 min max, skip if nothing to learn)
 Documentation=file:%h/ops/computer-use-lab/DESIGN.md
 
 [Timer]
-OnCalendar=*-*-* 14:00:00 Asia/Dhaka
+OnCalendar=*-*-* 05:00:00 Asia/Dhaka
 Persistent=true
 RandomizedDelaySec=120
 AccuracySec=1min

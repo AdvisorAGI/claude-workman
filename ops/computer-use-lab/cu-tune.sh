@@ -1,6 +1,6 @@
 #!/usr/bin/env bash
 # cu-tune.sh — daily DGX computer-use session.
-# One task, finish it, remember it. 30 minutes is a daily ceiling, not a quota.
+# One task, finish it, remember it. 15 minutes is a daily ceiling, not a quota.
 # If nothing is left to learn, the session exits without spending a seat.
 #
 #   cu-tune.sh [--probe] [--date YYYY-MM-DD] [--force]
@@ -37,10 +37,10 @@ LEARN_ROOT="${WORKMAN_LEARN_ROOT:-$HOME/.grok/workman-learn}"
 OUT_DIR="$LAB_DIR/runs/$DATE"
 mkdir -p "$OUT_DIR" "$LEARN_ROOT"
 STOP="$LAB_DIR/STOP"
-# 30 minutes is the daily max. Recheck uses a shorter cap. Grace is only to
+# 15 minutes is the daily max. Recheck uses a shorter cap. Grace is only to
 # finish the click already in flight, not to start a second task.
-MAX_SEC="${CU_TUNE_MAX_SEC:-1800}"
-GRACE_SEC="${CU_TUNE_GRACE_SEC:-300}"
+MAX_SEC="${CU_TUNE_MAX_SEC:-900}"
+GRACE_SEC="${CU_TUNE_GRACE_SEC:-60}"
 RECHECK_SEC="${CU_TUNE_RECHECK_SEC:-480}"
 MAX_TURNS="${CU_TUNE_MAX_TURNS:-40}"
 RECHECK_TURNS="${CU_TUNE_RECHECK_TURNS:-12}"
@@ -229,7 +229,7 @@ run_leader() {
     fable)
       run_with_cap claude -p --model "$LEADER_MODEL" --max-turns "$MAX_TURNS" \
         --output-format text \
-        --append-system-prompt "30 min is a max, not a target. Finish the one task you started, remember it if new, then stop. Do not invent extra work." \
+        --append-system-prompt "15 min is a max, not a target. Finish the one task you started, remember it if new, then stop. Do not invent extra work." \
         < "$PROMPT" >"$LEADER_OUT" 2>"$OUT_DIR/leader.err"
       ;;
     astra)

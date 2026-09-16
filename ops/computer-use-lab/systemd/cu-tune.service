@@ -1,5 +1,5 @@
 [Unit]
-Description=Workman computer-use daily tune on the DGX (one task, 30 min max, skip if known)
+Description=Workman computer-use daily tune on the DGX (one task, 15 min max, skip if known)
 Documentation=file:%h/ops/computer-use-lab/DESIGN.md
 After=docker.service
 
@@ -8,13 +8,13 @@ Type=oneshot
 Environment=PATH=%h/dgx-ai-lab/bin:%h/.local/bin:%h/bin:/usr/local/bin:/usr/bin:/bin
 Environment=WORKMAN_ROOT=%h/workman
 Environment=CU_TUNE_MAX_TURNS=40
-Environment=CU_TUNE_MAX_SEC=1800
-Environment=CU_TUNE_GRACE_SEC=300
+Environment=CU_TUNE_MAX_SEC=900
+Environment=CU_TUNE_GRACE_SEC=60
 Environment=CU_TUNE_RECHECK_SEC=480
 WorkingDirectory=%h/ops/computer-use-lab
 ExecStart=%h/ops/computer-use-lab/cu-tune.sh
-# 30 min work + 5 min finish-grace + verifier slack
-TimeoutStartSec=2400
+# 15 min work + 1 min finish-grace
+TimeoutStartSec=960
 Nice=10
 StandardOutput=append:%h/ops/computer-use-lab/cu-tune.log
 StandardError=append:%h/ops/computer-use-lab/cu-tune.log

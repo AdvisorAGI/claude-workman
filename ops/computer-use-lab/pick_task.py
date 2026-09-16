@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 """Pick today's one DGX computer-use task, or skip if nothing is left to learn.
 
-30 minutes is a daily ceiling, not a quota. If every task already has a
+15 minutes is a daily ceiling, not a quota. If every task already has a
 remembered skill and a recent success, the session does not run.
 """
 from __future__ import annotations
