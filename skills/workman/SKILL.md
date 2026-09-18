@@ -24,6 +24,14 @@ Park **this session's app** (the terminal or chat running the agent) in a **full
 - Also `layout_arrange({"layout":"agent","agent":"Terminal","work":"Firefox","side":"left"})`
 - Do this before the first screenshot of the work app.
 
+## Workman Desk
+
+`python -m workman.desk` opens a localhost composer (vendor + model + prompt)
+that runs the **CLI already logged in on this machine**: `grok -p`, `claude -p`,
+`codex exec`, `cursor-agent -p`. macOS, Ubuntu, and Windows. Loopback only.
+Enter sends, Shift+Enter newline. Session tasks from `~/.claude/board/sessions`
+show in the side column.
+
 ## Install (CLI)
 
 From a clone of this repo:

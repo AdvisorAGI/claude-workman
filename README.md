@@ -32,6 +32,22 @@ The same checkout is both the **connector** (`python -m workman.server`) and a
 **plugin** (`.claude-plugin/` + `.mcp.json` + `bin/workman`). The Mac-only
 Workman.app daemon is a separate private plugin and is not this repo.
 
+## Workman Desk — composer for every CLI seat
+
+A small local app (browser window) with a vendor menu, a model menu, and a
+composer. Enter sends the text through the **CLI you already logged into** on
+this machine — the same seats as `grok`, `claude`, `codex`, and `cursor-agent`.
+Works on macOS, Ubuntu, and Windows. It never calls a vendor HTTP API.
+
+```bash
+.venv/bin/python -m workman.desk          # opens http://127.0.0.1:8767
+bin/workman-desk --no-open                # print the URL only
+```
+
+Only vendors whose binary is on `PATH` (or `~/.grok/bin`, `~/.local/bin`) appear.
+Grok is started without `XAI_API_KEY` so the logged-in seat is used. Session
+tasks from `~/.claude/board/sessions` show in the side column.
+
 ---
 
 ## Why accessibility-tree clicking beats pixel clicking

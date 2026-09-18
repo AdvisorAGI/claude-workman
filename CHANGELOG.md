@@ -4,6 +4,14 @@ All notable changes to claude-workman.
 
 ## [Unreleased]
 
+### Added — Workman Desk (composer + CLI seats)
+
+- **`workman-desk`** / `python -m workman.desk` — a localhost app (macOS, Linux,
+  Windows) with a composer, vendor picker (Grok / Claude / Codex / Cursor) and
+  a model chooser. Send runs the **logged-in CLI** (`grok -p`, `claude -p`,
+  `codex exec`, `cursor-agent -p`), not an API key. Loopback only. The existing
+  session task list is shown beside the chat.
+
 ### Added — workman-mode 1/4 agent strip
 
 - **`layout_agent`** — park the session app (the terminal or chat running the
