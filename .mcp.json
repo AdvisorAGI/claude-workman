@@ -1,0 +1,8 @@
+{
+  "mcpServers": {
+    "workman": {
+      "command": "${CLAUDE_PLUGIN_ROOT}/bin/workman",
+      "args": []
+    }
+  }
+}

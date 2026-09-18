@@ -4,6 +4,14 @@ All notable changes to claude-workman.
 
 ## [Unreleased]
 
+### Added — workman-mode 1/4 agent strip
+
+- **`layout_agent`** — park the session app (the terminal or chat running the
+  agent) in a full-height quarter of the working area; the app being driven
+  fills the other three quarters. `side` is left (default) or right. `work` is
+  optional. Also `layout_arrange({"layout":"agent",...})` and aliases
+  `strip` / `workman`.
+
 ### Added — token-light computer-use memory
 
 - **`cu_memory`** — one MCP tool, always `{ok, op, n, lines}` under ~1600 characters

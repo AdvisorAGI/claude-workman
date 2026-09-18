@@ -9,15 +9,28 @@
 assistant human-mode control of a real desktop — it takes a screenshot, reads the
 accessibility tree, then moves the mouse, clicks, types, and switches windows.**
 One tool surface, three backends: X11 on Linux, Quartz on macOS, Win32 on Windows.
-It works with Claude, Claude Code, and any other MCP client.
+It works with Claude, Claude Code, Grok, and any other MCP client.
 
 Named after the Walkman: a small, portable thing that just plays. Point it at a display
 and it works.
 
 ```bash
-pip install claude-workman
-claude mcp add --scope user workman -- python -m workman.server
+git clone https://github.com/AdvisorAGI/claude-workman.git
+cd claude-workman
+python3 -m venv .venv
+.venv/bin/pip install -e ".[macos]"    # Linux: ".[extras]"   Windows: ".[windows]"
+
+# Connector — any MCP client
+claude mcp add --scope user workman -- .venv/bin/python -m workman.server
+
+# Plugin — Claude Code or Grok CLI
+claude plugin install .
+grok plugin install . --trust
 ```
+
+The same checkout is both the **connector** (`python -m workman.server`) and a
+**plugin** (`.claude-plugin/` + `.mcp.json` + `bin/workman`). The Mac-only
+Workman.app daemon is a separate private plugin and is not this repo.
 
 ---
 
@@ -83,6 +96,15 @@ macOS AXUIElement-based computer use, ported to Linux via AT-SPI2 (`gi.repositor
 | `clipboard_get` / `clipboard_set` | Read/write the clipboard — the reliable way to enter long or exact strings |
 | `batch` | Run several actions in one round-trip |
 | `show_cursor` | Visual click cursor overlay: a ring + click ripple showing exactly where the agent is acting |
+
+**Layout**
+
+| Tool | What it does |
+|------|--------------|
+| `layout_agent` | Workman-mode desk: park the session app in a full-height **1/4** strip; the app being driven fills the other **3/4**. `side` is `left` (default) or `right`. Omit `work` to place only the strip |
+| `layout_full` / `layout_split` / `layout_stack` | One window fills the working area; two side by side (`ratio` is the left share); up to three equal columns |
+| `layout_arrange` | One spec: `{"layout":"agent"\|"full"\|"split"\|"stack", ...}` |
+| `window_tile` | OS-native halves, quarters, fill, center |
 
 **Memory (token-light)**
 
