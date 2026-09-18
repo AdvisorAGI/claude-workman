@@ -1,0 +1,11 @@
+#!/bin/sh
+# Workman Desk: composer + vendor/model chooser driving local CLI seats.
+set -u
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" -m workman.desk "$@"
+fi
+if [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  exec "$ROOT/.venv/Scripts/python.exe" -m workman.desk "$@"
+fi
+exec python3 -m workman.desk "$@"

@@ -1,0 +1,201 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Workman Desk</title>
+<style>
+  :root { --bg:#12141a; --panel:#1b1e27; --ink:#e8eaef; --muted:#8b90a0; --line:#2a2e3a; --accent:#7eb0ff; --go:#3dd68c; --stop:#ff6b6b; }
+  * { box-sizing: border-box; }
+  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
+  #app { display:grid; grid-template-rows: auto 1fr auto; height:100%; }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
+  header h1 { font-size:15px; margin:0 12px 0 0; font-weight:650; letter-spacing:.02em; }
+  label { font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:3px; }
+  select, input[type=text] { background:#0e1016; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:6px 8px; min-width:140px; font-size:14px; }
+  #cwd { min-width:220px; }
+  button { border:0; border-radius:8px; padding:8px 12px; font-weight:600; cursor:pointer; }
+  #send { background:var(--go); color:#062; }
+  #stop { background:var(--stop); color:#fff; display:none; }
+  #main { display:grid; grid-template-columns: 1fr 280px; min-height:0; }
+  @media (max-width: 800px) { #main { grid-template-columns: 1fr; } }
+  #log { overflow:auto; padding:16px 18px; white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:14px; }
+  #log .me { color:var(--accent); }
+  #log .sys { color:var(--muted); }
+  aside { border-left:1px solid var(--line); overflow:auto; padding:12px; background:#161821; font-size:13px; }
+  aside h2 { margin:0 0 8px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+  .task { margin:0 0 12px; }
+  .task b { display:block; margin-bottom:4px; }
+  .st-working { color:#ffc857; }
+  .st-blocked { color:#ff6b6b; }
+  .st-done { color:#3dd68c; }
+  .st-pending { color:var(--muted); }
+  footer { border-top:1px solid var(--line); padding:10px 14px; background:var(--panel); }
+  textarea { width:100%; min-height:72px; max-height:200px; resize:vertical; background:#0e1016; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font: 16px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  .row { display:flex; gap:8px; align-items:flex-end; margin-top:8px; }
+  .hint { color:var(--muted); font-size:12px; margin-left:auto; }
+</style>
+</head>
+<body>
+<div id="app">
+  <header>
+    <h1>Workman Desk</h1>
+    <label>Vendor <select id="vendor"></select></label>
+    <label>Model <select id="model"></select></label>
+    <label>Folder <input id="cwd" type="text" spellcheck="false"></label>
+    <label style="flex-direction:row; align-items:center; gap:6px; margin-top:18px;">
+      <input id="approve" type="checkbox"> Allow tools
+    </label>
+  </header>
+  <div id="main">
+    <div id="log"></div>
+    <aside>
+      <h2>Tasks</h2>
+      <div id="tasks">No session tasks.</div>
+    </aside>
+  </div>
+  <footer>
+    <textarea id="prompt" placeholder="Type like the CLI. Enter sends, Shift+Enter newline."></textarea>
+    <div class="row">
+      <button id="send" type="button">Send</button>
+      <button id="stop" type="button">Stop</button>
+      <span class="hint" id="hint">Logged-in CLI seats only. No API keys.</span>
+    </div>
+  </footer>
+</div>
+<script>
+const vendorEl = document.getElementById("vendor");
+const modelEl = document.getElementById("model");
+const cwdEl = document.getElementById("cwd");
+const promptEl = document.getElementById("prompt");
+const logEl = document.getElementById("log");
+const tasksEl = document.getElementById("tasks");
+const sendBtn = document.getElementById("send");
+const stopBtn = document.getElementById("stop");
+const approveEl = document.getElementById("approve");
+let seats = [];
+let running = false;
+let abortCtl = null;
+
+function add(cls, text) {
+  const d = document.createElement("div");
+  if (cls) d.className = cls;
+  d.textContent = text;
+  logEl.appendChild(d);
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+function fillModels() {
+  const seat = seats.find(s => s.id === vendorEl.value);
+  modelEl.innerHTML = "";
+  (seat ? seat.models : []).forEach(m => {
+    const o = document.createElement("option");
+    o.value = m; o.textContent = m;
+    if (seat && m === seat.default_model) o.selected = true;
+    modelEl.appendChild(o);
+  });
+}
+
+function renderTasks(rows) {
+  if (!rows || !rows.length) { tasksEl.textContent = "No session tasks."; return; }
+  tasksEl.innerHTML = "";
+  rows.forEach(s => {
+    const wrap = document.createElement("div");
+    wrap.className = "task";
+    const title = document.createElement("b");
+    title.textContent = s.task || s.id;
+    wrap.appendChild(title);
+    (s.items || []).forEach(it => {
+      const line = document.createElement("div");
+      line.className = "st-" + (it.state || "pending");
+      line.textContent = (it.state || "") + " · " + (it.text || "");
+      wrap.appendChild(line);
+      if (it.state === "blocked" && it.ask) {
+        const ask = document.createElement("div");
+        ask.className = "st-blocked";
+        ask.textContent = "needs you: " + it.ask;
+        wrap.appendChild(ask);
+      }
+    });
+    tasksEl.appendChild(wrap);
+  });
+}
+
+async function boot() {
+  const r = await fetch("/api/status");
+  const s = await r.json();
+  seats = s.vendors || [];
+  cwdEl.value = s.cwd || "";
+  vendorEl.innerHTML = "";
+  if (!seats.length) {
+    add("sys", "No CLI seats found (grok, claude, codex, cursor-agent). Install one and log in.");
+    return;
+  }
+  seats.forEach(v => {
+    const o = document.createElement("option");
+    o.value = v.id; o.textContent = v.label + "  " + v.binary;
+    vendorEl.appendChild(o);
+  });
+  vendorEl.onchange = fillModels;
+  fillModels();
+  renderTasks(s.tasks);
+  add("sys", "Ready. This types into the selected CLI on this machine.");
+}
+
+async function send() {
+  const prompt = promptEl.value.trim();
+  if (!prompt || running) return;
+  running = true;
+  sendBtn.style.display = "none";
+  stopBtn.style.display = "inline-block";
+  add("me", "you · " + vendorEl.value + " / " + modelEl.value + "\n" + prompt);
+  promptEl.value = "";
+  abortCtl = new AbortController();
+  try {
+    const res = await fetch("/api/run", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      signal: abortCtl.signal,
+      body: JSON.stringify({
+        vendor: vendorEl.value,
+        model: modelEl.value,
+        prompt,
+        cwd: cwdEl.value,
+        auto_approve: approveEl.checked
+      })
+    });
+    const reader = res.body.getReader();
+    const dec = new TextDecoder();
+    let buf = "";
+    const node = document.createElement("div");
+    logEl.appendChild(node);
+    while (true) {
+      const {value, done} = await reader.read();
+      if (done) break;
+      buf += dec.decode(value, {stream: true});
+      node.textContent = buf;
+      logEl.scrollTop = logEl.scrollHeight;
+    }
+  } catch (err) {
+    if (err.name !== "AbortError") add("sys", String(err));
+  }
+  running = false;
+  sendBtn.style.display = "inline-block";
+  stopBtn.style.display = "none";
+}
+
+sendBtn.onclick = send;
+stopBtn.onclick = () => { fetch("/api/stop", {method:"POST"}); if (abortCtl) abortCtl.abort(); };
+promptEl.addEventListener("keydown", e => {
+  if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
+});
+boot();
+setInterval(async () => {
+  try {
+    const s = await (await fetch("/api/status")).json();
+    renderTasks(s.tasks);
+  } catch (_) {}
+}, 4000);
+</script>
+</body>
+</html>
