@@ -37,6 +37,7 @@ particular resolution: the geometry is always read from `desktop.monitors()`.
     layout.focus_and_verify("Editor")
     layout.fullscreen("Editor")
     layout.split("Editor", "Browser", ratio=0.6)
+    layout.agent_strip("Terminal", work="Chrome", side="left")
 """
 from __future__ import annotations
 
@@ -55,6 +56,11 @@ from .platform import backend_name
 #: viewing distance; a fourth column buys nothing a second display would not buy
 #: better. `stack` refuses above this rather than silently dropping windows.
 STACK_CAP = 3
+
+#: Workman-mode desk: the session app keeps one quarter of the working area,
+#: full height; the app being driven gets the other three quarters. Left is
+#: the default.
+AGENT_RATIO = 0.25
 
 #: How long to wait for a window's geometry to stop changing after a move. Long
 #: enough for an app to run its own resize logic, short enough that a failed
@@ -1790,6 +1796,92 @@ def _native_split(resolved: list[dict], frame_reply: dict,
     return out
 
 
+
+@_never_raises
+def agent_strip(agent: str, work: str | None = None, side: str = "left",
+                display: int | str | None = None) -> dict:
+    """Park the session app in a full-height 1/4 strip; give 3/4 to the work app.
+
+    Workman-mode desk: the session app stays in one quarter, full height, and
+    the app being driven fills the other three quarters. `side` is left
+    (default) or right.
+
+    `work` is optional. Without it only the agent strip is placed, so the
+    remaining three quarters stay free for the next window. Native half-tile
+    menus are not used: they cannot cut a quarter.
+    """
+    side_n = str(side or "left").strip().lower()
+    if side_n not in ("left", "right"):
+        return {"ok": False, "error": f"side must be left or right, got {side!r}"}
+    agent_q = str(agent or "").strip()
+    if not agent_q:
+        return {"ok": False, "error": "agent needs a window query"}
+    work_q = str(work or "").strip() or None
+
+    if work_q:
+        if side_n == "left":
+            result = split(agent_q, work_q, ratio=AGENT_RATIO, display=display,
+                           prefer_menu=False)
+        else:
+            result = split(work_q, agent_q, ratio=1.0 - AGENT_RATIO,
+                           display=display, prefer_menu=False)
+        work_win = _find_window(work_q)
+        if work_win is not None:
+            _raise_window(work_win)
+        if isinstance(result, dict):
+            result["layout"] = "agent"
+            result["agent_side"] = side_n
+            result["agent_ratio"] = AGENT_RATIO
+            result["agent"] = agent_q
+            result["work"] = work_q
+        return result
+
+    listing = _windows()
+    win = _find_window(agent_q, listing=listing)
+    if win is None:
+        return {"ok": False, "error": f"no window matching {agent_q!r}",
+                "layout": "agent", "windows": _known_windows()}
+    monitor, error = _pick_display(display, near=win)
+    if error is not None:
+        return {**error, "layout": "agent"}
+    frame_reply = visible_frame(_index_of(monitor))
+    if not frame_reply.get("ok"):
+        return {**frame_reply, "layout": "agent"}
+    frame = frame_reply["frame"]
+    strip_w = int(round(frame["w"] * AGENT_RATIO))
+    if side_n == "left":
+        tile = {"x": frame["x"], "y": frame["y"], "w": strip_w, "h": frame["h"]}
+    else:
+        tile = {"x": frame["x"] + frame["w"] - strip_w, "y": frame["y"],
+                "w": strip_w, "h": frame["h"]}
+    placed = _place(win, tile)
+    _raise_window(_relocate(win) or win)
+    scale = float(monitor.get("backing_scale") or 1.0)
+    out = {
+        "ok": bool(placed.get("ok")),
+        "layout": "agent",
+        "agent_side": side_n,
+        "agent_ratio": AGENT_RATIO,
+        "agent": agent_q,
+        "work": None,
+        "route": "geometry",
+        "display": frame_reply["display"],
+        "frame": frame,
+        "respects_chrome": frame_reply["respects_chrome"],
+        "honored": bool(placed.get("honored")),
+        "windows": [{**placed, "slot": 0, "raised": True,
+                     "tile_w_points": tile["w"],
+                     "tile_w_pixels": int(round(tile["w"] * scale))}],
+        "strip": tile,
+    }
+    if frame_reply.get("note"):
+        out["frame_note"] = frame_reply["note"]
+    if not out["honored"]:
+        out["note"] = ("the session window did not take the quarter strip; "
+                       "check `delta` — applications enforce minimum sizes")
+    return out
+
+
 @_never_raises
 def arrange(spec) -> dict:
     """One entry point a tool layer can expose. Dispatches on `spec['layout']`.
@@ -1813,7 +1905,8 @@ def arrange(spec) -> dict:
     layout = str(spec.get("layout") or "").strip().lower()
     aliases = {"full": "full", "fullscreen": "full", "maximise": "full",
                "maximize": "full", "split": "split", "half": "split",
-               "stack": "stack", "tile": "stack"}
+               "stack": "stack", "tile": "stack", "agent": "agent",
+               "strip": "agent", "workman": "agent"}
     layout = aliases.get(layout, layout)
     if layout == "full":
         return fullscreen(query=spec.get("query") or spec.get("window"),
@@ -1827,10 +1920,17 @@ def arrange(spec) -> dict:
     if layout == "stack":
         queries = spec.get("queries") or spec.get("windows") or []
         return stack(queries, display=spec.get("display"))
+    if layout == "agent":
+        agent = spec.get("agent") or spec.get("session") or spec.get("query")
+        if not agent:
+            return {"ok": False, "error": "agent needs 'agent' (the session app)"}
+        return agent_strip(agent, work=spec.get("work") or spec.get("target"),
+                           side=spec.get("side") or "left",
+                           display=spec.get("display"))
     return {"ok": False, "error": f"unknown layout {spec.get('layout')!r}",
-            "layouts": ["full", "split", "stack"]}
+            "layouts": ["full", "split", "stack", "agent"]}
 
 
-__all__ = ["STACK_CAP", "arrange", "focus_and_verify", "fullscreen",
-           "native_tiling", "split", "stack", "tile", "tile_actions",
-           "visible_frame"]
+__all__ = ["AGENT_RATIO", "STACK_CAP", "agent_strip", "arrange",
+           "focus_and_verify", "fullscreen", "native_tiling", "split", "stack",
+           "tile", "tile_actions", "visible_frame"]

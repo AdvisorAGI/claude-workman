@@ -1526,9 +1526,23 @@ def layout_stack(queries: list[str], display: int | str | None = None) -> dict:
     return workspace_layout.stack(queries, display=display)
 
 
+
+@mcp.tool()
+def layout_agent(agent: str, work: str | None = None, side: str = "left",
+                 display: int | str | None = None) -> dict:
+    """Park the session app in a full-height 1/4 strip; give 3/4 to the work app.
+
+    Workman-mode desk: the session app stays in one quarter, full height, and
+    the app being driven fills the other three quarters. `side` is left
+    (default) or right. Omit `work` to place only the agent strip.
+    """
+    return workspace_layout.agent_strip(agent, work=work, side=side,
+                                        display=display)
+
+
 @mcp.tool()
 def layout_arrange(spec: dict) -> dict:
-    """Apply a layout from one spec: {"layout": "full"|"split"|"stack", ...}.
+    """Apply a layout from one spec: {"layout": "full"|"split"|"stack"|"agent", ...}.
 
     The declarative form of the three above -- describe the arrangement the task
     needs and let it place the windows.
