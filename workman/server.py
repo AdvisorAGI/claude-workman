@@ -21,7 +21,7 @@ import time
 
 from mcp.server.fastmcp import FastMCP, Image
 
-from . import desktop, human
+from . import botsafety, desktop, human
 
 
 class _NeverRaised(Exception):
@@ -104,9 +104,14 @@ def _input(name: str, args: dict, run) -> dict:
     an interrupted result so resume_interrupted can finish it."""
     refused = _challenge_refusal(name)
     if refused is not None:
+        botsafety.after(name, refused)
         return resume.remember(name, args, refused)
+    refused = botsafety.before(name, args)
+    if refused is not None:
+        return refused
     handback.note_pointer_before()
     result = run()
+    botsafety.after(name, result)
     return resume.remember(name, args, result)
 
 
@@ -439,6 +444,28 @@ def workman_get_human_mode() -> dict:
     return human.get_mode()
 
 
+@mcp.tool()
+def bot_safety_check() -> dict:
+    """Measure how human this session's input has looked so far. Returns a
+    0-100 score (100 = reads as a person), a verdict (human / watch /
+    bot-like), whether the active window is a sensitive site (Stripe, Google
+    Ads, Meta, banks, logins), actions in the last minute, the interval
+    variation, every tell counted (address-bar navigation, short pastes,
+    bursts, metronome pacing, round waits, synthetic events, Human Mode
+    off) and advice. Run it before and during work on any account that must
+    not get flagged. On sensitive sites the strong tells are refused, not
+    just counted, while bot safety is in enforce mode."""
+    return botsafety.report()
+
+
+@mcp.tool()
+def bot_safety_mode(mode: str = "enforce") -> dict:
+    """Set bot safety: enforce (default: refuse strong tells on sensitive
+    sites, pace every input like a person), warn (measure only), off. Only
+    lower it when the owner says so."""
+    return botsafety.set_mode(mode)
+
+
 def _click_with_human(x: int, y: int, button: int, count: int,
                       modifiers: list[str]) -> dict:
     """Human-move to the target, then click while holding modifiers in place."""
@@ -647,6 +674,7 @@ def wait(seconds: float = 1.0) -> dict:
     """Pause for the UI to settle. Cap 30s — for anything longer, wait on a
     specific element with wait_for_element instead of guessing."""
     seconds = max(0.0, min(float(seconds), 30.0))
+    seconds = min(botsafety.jitter_wait(seconds), 30.0)
     time.sleep(seconds)
     return {"ok": True, "waited_s": seconds}
 
@@ -666,6 +694,7 @@ def clipboard_set(text: str, selection: str = "clipboard") -> dict:
     written; PRIMARY is owned by whatever last selected text and no manager
     persists it. `stored` false means no clipboard manager is running and the
     text may not outlive this call."""
+    botsafety.note_clipboard(text)
     return desktop.clipboard_set(text=text, selection=selection)
 
 
@@ -803,7 +832,8 @@ def chrome_open_url(url: str, new_tab: bool = True) -> dict:
     """Open a URL the way a person does: focus Chrome, ctrl+t (or ctrl+l to
     reuse the tab), type the URL with human cadence, press Return. Waits for
     the tab title to change before returning."""
-    return chrome.open_url(url, new_tab=new_tab)
+    return _input("chrome_open_url", {"url": url, "new_tab": new_tab},
+                  lambda: chrome.open_url(url, new_tab=new_tab))
 
 
 @mcp.tool()
@@ -997,7 +1027,12 @@ def bridge_dom_click(tabId: int, selector: str | None = None,
         args["selector"] = selector
     if text:
         args["text"] = text
-    return bridge.call("dom.click", args)
+    refused = botsafety.before("bridge_dom_click", args)
+    if refused is not None:
+        return refused
+    out = bridge.call("dom.click", args)
+    botsafety.after("bridge_dom_click", out)
+    return out
 
 
 @mcp.tool()
@@ -1007,9 +1042,13 @@ def bridge_dom_type(tabId: int, selector: str, text: str,
 
     Detectable. For stealth, bridge_dom_locate then type_text with Human Mode.
     """
-    return bridge.call("dom.type",
-                       {"tabId": tabId, "selector": selector, "text": text,
-                        "clear": clear})
+    args = {"tabId": tabId, "selector": selector, "text": text, "clear": clear}
+    refused = botsafety.before("bridge_dom_type", args)
+    if refused is not None:
+        return refused
+    out = bridge.call("dom.type", args)
+    botsafety.after("bridge_dom_type", out)
+    return out
 
 
 @mcp.tool()
@@ -1066,7 +1105,10 @@ def bridge_locate_and_click(selector_or_text: str, tabId: int,
     DOM events are not used. Returns the located rect and the click result so
     a caller can see what it aimed at.
     """
-    return bridge.locate_and_click(selector_or_text, tabId, timeout_s=timeout_s)
+    return _input("bridge_locate_and_click",
+                  {"selector_or_text": selector_or_text, "tabId": tabId},
+                  lambda: bridge.locate_and_click(selector_or_text, tabId,
+                                                  timeout_s=timeout_s))
 
 
 # ---- SESSION CONTINUITY ----------------------------------------------------
@@ -1329,6 +1371,7 @@ _BATCH_OPS = {
     "chrome_autoscroll_to_top": chrome_autoscroll_to_top,
     "workman_set_human_mode": workman_set_human_mode,
     "workman_get_human_mode": workman_get_human_mode,
+    "bot_safety_check": bot_safety_check,
     "input_control": input_control, "hand_back": hand_back, "remote": remote,
 }
 

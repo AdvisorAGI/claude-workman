@@ -20,7 +20,7 @@ import subprocess
 
 import pytest
 
-from workman import apps, chrome, desktop, handback, owner_pause, resume, shell_guard, x11, xtest
+from workman import apps, botsafety, chrome, desktop, handback, owner_pause, resume, shell_guard, x11, xtest
 from workman.platform import ax_darwin, darwin
 
 
@@ -47,6 +47,10 @@ def _no_live_desktop(monkeypatch, tmp_path):
     monkeypatch.setattr(owner_pause, "_last_mark", {"agent": 0.0, "human": 0.0})
     monkeypatch.setattr(chrome, "challenge_active", lambda: False)
     monkeypatch.setattr(handback, "note_pointer_before", lambda: None)
+    # Bot safety reads the live window title and paces with real sleeps; off
+    # for the suite, test_botsafety turns it back on with fakes.
+    monkeypatch.setattr(botsafety, "_active_title", lambda: "")
+    botsafety.reset("off")
 
     monkeypatch.setattr(darwin, "_quartz_mod", None)
     monkeypatch.setattr(darwin, "_quartz_tried", True)
