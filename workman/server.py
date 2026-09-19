@@ -129,6 +129,7 @@ def screenshot(max_dim: int | None = None, full_resolution: bool = False,
     save_to_disk writes a copy and returns the path — only worth it when a human
     is meant to look at the file.
     """
+    botsafety.note_look()
     raw = desktop.screenshot(max_dim=max_dim)
     meta = {"screen": list(desktop.screen_size()), "view": None, "scale": 1.0, "resized": False}
     data = raw
@@ -159,6 +160,7 @@ def screenshot(max_dim: int | None = None, full_resolution: bool = False,
 def screenshot_region(x: int, y: int, w: int, h: int) -> Image:
     """Capture a sub-rectangle of the screen at native resolution (faster than a
     full grab). For reading small detail, prefer `zoom`, which also magnifies."""
+    botsafety.note_look()
     data = desktop.screenshot(region=(x, y, w, h))
     shot = shotlog.archive_capture(data, "png", "screenshot_region")
     shotlog.journal("screenshot_region", {"region": [x, y, w, h], "shot": shot})
@@ -177,6 +179,7 @@ def zoom(x1: int, y1: int, x2: int, y2: int, space: str = "view",
     enlarging the screenshot itself could not. Coordinates default to the space
     of the last screenshot.
     """
+    botsafety.note_look()
     try:
         screen_w, screen_h = desktop.screen_size()
         if space == "view":
@@ -739,6 +742,9 @@ def enable_accessibility(enable_web: bool = True) -> dict:
 def accessibility_tree(app: str | None = None, actionable_only: bool = True) -> list[dict]:
     """Dump actionable UI elements as {app, role, name, x, y, w, h} with screen
     coordinates. Filter by app name substring. Call enable_accessibility first."""
+    refused = botsafety.before_read("accessibility_tree")
+    if refused is not None:
+        return [refused]
     return a11y.tree(app=app, actionable_only=actionable_only)
 
 
@@ -857,6 +863,9 @@ def chrome_read_page() -> dict:
     """Visible text of the active tab via the Chrome window's AT-SPI tree
     (capped at 20000 chars), plus role/name of interactive elements.
     Call enable_accessibility first so Chromium exports the web content."""
+    refused = botsafety.before_read("chrome_read_page")
+    if refused is not None:
+        return refused
     return chrome.read_page()
 
 
@@ -901,6 +910,9 @@ def chrome_autoscroll_read(selector: str | None = None, max_scrolls: int = 40,
     variable acceleration and small pauses. `screenshots=True` saves one
     PNG per step and returns the paths.
     """
+    refused = botsafety.before_read("chrome_autoscroll_read")
+    if refused is not None:
+        return refused
     return chrome.autoscroll_read(selector=selector, max_scrolls=max_scrolls,
                                   overlap_lines=overlap_lines,
                                   screenshots=screenshots, human=human)
@@ -984,6 +996,9 @@ def bridge_dom_query(tabId: int, selector: str, all_matches: bool = False) -> di
 
     all_matches=True returns up to 500 matches; otherwise the first match.
     """
+    refused = botsafety.before_read("bridge_dom_query")
+    if refused is not None:
+        return refused
     return bridge.call("dom.query",
                        {"tabId": tabId, "selector": selector, "all": all_matches})
 
@@ -1008,6 +1023,9 @@ def bridge_dom_locate(tabId: int, selector: str | None = None,
 @mcp.tool()
 def bridge_dom_read(tabId: int, selector: str | None = None) -> dict:
     """innerText of the selector, or of the whole document. Capped at 30000 chars."""
+    refused = botsafety.before_read("bridge_dom_read")
+    if refused is not None:
+        return refused
     args: dict = {"tabId": tabId}
     if selector:
         args["selector"] = selector
@@ -1089,6 +1107,7 @@ def bridge_page_await(tabId: int, selector: str, timeout_ms: int = 10000) -> dic
 @mcp.tool()
 def bridge_shot_visible(tabId: int | None = None) -> dict:
     """PNG data URL of the visible tab. If tabId is given it must already be active."""
+    botsafety.note_look()
     args: dict = {}
     if tabId is not None:
         args["tabId"] = tabId

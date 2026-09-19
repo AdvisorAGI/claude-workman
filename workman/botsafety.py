@@ -76,11 +76,21 @@ INPUT_TOOLS = frozenset((
 #: Synthetic channels a page can tell apart from real input.
 SYNTHETIC_TOOLS = frozenset(("bridge_dom_click", "bridge_dom_type"))
 
+#: Tools that read the page without looking at it. A person reads the screen;
+#: an agent that cannot see well starts scraping, page after page.
+SCRAPE_TOOLS = frozenset((
+    "chrome_read_page", "chrome_autoscroll_read", "bridge_dom_read",
+    "bridge_dom_query", "accessibility_tree",
+))
+#: Reads allowed in a row on a sensitive site before a look is required.
+SCRAPE_STREAK_MAX = 2
+
 #: Penalty per tell for the score (100 = clean, clipped at 0).
 PENALTY = {
     "human_mode_off": 25, "synthetic_input": 20, "address_bar_nav": 6,
     "short_paste": 5, "too_fast": 2, "rate_burst": 4, "metronome": 4,
     "round_wait": 1, "challenge_seen": 30,
+    "page_scrape": 1, "zombie_scrape": 5, "scrape_scroll": 8,
 }
 ADVICE = {
     "human_mode_off": "Keep Human Mode on (workman_set_human_mode on=true).",
@@ -92,6 +102,9 @@ ADVICE = {
     "metronome": "Vary the pace; identical gaps between actions read as a script.",
     "round_wait": "Prefer wait_for_element / chrome_wait_load over fixed waits.",
     "challenge_seen": "A bot challenge appeared: stop, leave it to the owner.",
+    "page_scrape": "Read the screen: screenshot, then zoom on what you need.",
+    "zombie_scrape": "Stop scraping page after page; look (screenshot + zoom) first.",
+    "scrape_scroll": "Do not machine-scroll a whole page on this site; scroll and zoom like a reader.",
 }
 
 _lock = threading.RLock()
@@ -112,6 +125,7 @@ def reset(mode: str | None = None) -> None:
             "clipboard_len": None,           # length of text the agent last set
             "slept_ms": 0.0,
             "last_title": "",
+            "scrape_streak": 0,
             "rng": random.Random(),
         })
 
@@ -231,6 +245,45 @@ def before(name: str, args: dict | None = None) -> dict | None:
                 return _refusal(tell, name, instruction, title)
         if name in INPUT_TOOLS or name in SYNTHETIC_TOOLS:
             _pace(sensitive, enforce=(m == "enforce"))
+        return None
+
+
+def note_look() -> None:
+    """A screenshot or zoom: the agent looked, the scrape streak ends."""
+    with _lock:
+        if _state:
+            _state["scrape_streak"] = 0
+
+
+def before_read(name: str) -> dict | None:
+    """Run before a page-scraping read. Counts it; on a sensitive site in
+    enforce mode refuses a whole-page autoscroll and a scrape streak with no
+    look in between. Returns a refusal dict or None."""
+    with _lock:
+        if not _state:
+            reset()
+        m = _state["mode"]
+        if m == "off" or name not in SCRAPE_TOOLS:
+            return None
+        title = _active_title()
+        sensitive = is_sensitive(title)
+        _state["tells"]["page_scrape"] += 1
+        _state["scrape_streak"] += 1
+        tell = instruction = None
+        if name == "chrome_autoscroll_read":
+            tell, instruction = "scrape_scroll", (
+                "Machine-scrolling the whole page is a tell here. Take a screenshot, "
+                "zoom on the part you need, scroll a little with scroll(), repeat.")
+        elif _state["scrape_streak"] > SCRAPE_STREAK_MAX:
+            tell, instruction = "zombie_scrape", (
+                "Too many page reads without looking. Take a screenshot, zoom on the "
+                "region you need to read, then act on what you see.")
+        if tell is None:
+            return None
+        _state["tells"][tell] += 1
+        if m == "enforce" and sensitive:
+            _state["refused"][tell] += 1
+            return _refusal(tell, name, instruction, title)
         return None
 
 

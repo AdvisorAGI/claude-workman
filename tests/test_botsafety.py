@@ -135,3 +135,26 @@ def test_sensitive_markers():
     assert botsafety.is_sensitive(STRIPE)
     assert botsafety.is_sensitive("Google Ads - Overview")
     assert not botsafety.is_sensitive("YouTube")
+
+
+def test_autoscroll_scrape_refused_on_sensitive(bs):
+    r = botsafety.before_read("chrome_autoscroll_read")
+    assert r["tell"] == "scrape_scroll"
+
+
+def test_zombie_scrape_needs_a_look(bs):
+    assert botsafety.before_read("bridge_dom_read") is None
+    assert botsafety.before_read("chrome_read_page") is None
+    assert botsafety.before_read("bridge_dom_query")["tell"] == "zombie_scrape"
+    botsafety.note_look()
+    assert botsafety.before_read("bridge_dom_query") is None
+    rep = botsafety.report()
+    assert rep["tells"]["page_scrape"] == 4 and rep["refused"]["zombie_scrape"] == 1
+
+
+def test_scrape_only_counted_off_sensitive(bs):
+    _, title = bs
+    title["v"] = NEUTRAL
+    for _ in range(5):
+        assert botsafety.before_read("chrome_read_page") is None
+    assert botsafety.report()["tells"]["zombie_scrape"] == 3
