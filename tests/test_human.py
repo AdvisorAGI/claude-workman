@@ -371,3 +371,17 @@ class TestModeFlag:
         result = server.scroll("down", amount=5)
         assert result["human"] is True
         assert seen == [("human", 5)]
+
+
+class TestSpeedKnobDefault:
+    def test_missing_env_is_one(self, monkeypatch):
+        monkeypatch.delenv("WORKMAN_HUMAN_SPEED", raising=False)
+        assert human.speed() == 1.0
+
+    def test_easing_profile_is_unchanged(self):
+        assert human._ease_in_out(0.0) == 0.0
+        assert human._ease_in_out(1.0) == 1.0
+        assert abs(human._ease_in_out(0.5) - 0.5) < 1e-9
+        early = human._ease_in_out(0.1) - human._ease_in_out(0.0)
+        mid = human._ease_in_out(0.55) - human._ease_in_out(0.45)
+        assert mid > early * 3

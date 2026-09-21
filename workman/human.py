@@ -12,6 +12,7 @@ tests are deterministic; in real use the seed varies per session.
 from __future__ import annotations
 
 import math
+import os
 import random
 import re
 import time
@@ -125,9 +126,11 @@ def get_mode() -> dict:
 
 def apply_session_default() -> dict:
     """Human Mode is the default for a fresh server. WORKMAN_HUMAN_MODE=0
-    opts out for a session that wants the fast, direct path."""
-    import os
+    opts out for a session that wants the fast, direct path.
 
+    WORKMAN_HUMAN_SPEED (default 1.0) is not stored here. speed() reads it
+    live so a bad value cannot freeze session state.
+    """
     raw = os.environ.get("WORKMAN_HUMAN_MODE", "1").strip().lower()
     on = raw not in ("0", "false", "no", "off")
     seed = os.environ.get("WORKMAN_HUMAN_SEED")
@@ -154,9 +157,31 @@ def session_rng() -> random.Random:
     return resolve_rng(None)
 
 
+def speed() -> float:
+    """Cadence multiplier from WORKMAN_HUMAN_SPEED.
+
+    Default 1.0. Invalid, nonpositive, or nonfinite values use 1.0 so a
+    bad env value cannot freeze or unbounded-race the pointer.
+    """
+    raw = os.environ.get("WORKMAN_HUMAN_SPEED", "1.0")
+    try:
+        value = float(str(raw).strip())
+    except (TypeError, ValueError):
+        return 1.0
+    if value <= 0.0 or not math.isfinite(value):
+        return 1.0
+    return value
+
+
+def _wall_ms(ms: float) -> float:
+    """Nominal milliseconds converted to wall time at the current speed."""
+    return max(0.0, float(ms) / speed())
+
+
 def _sleep_ms(ms: float) -> None:
-    if ms > 0:
-        time.sleep(ms / 1000.0)
+    wall = _wall_ms(ms)
+    if wall > 0:
+        time.sleep(wall / 1000.0)
 
 
 def _ease_in_out(t: float) -> float:
@@ -491,7 +516,7 @@ def human_move(x: int, y: int, rng: random.Random | None = None,
     except Interrupted as exc:
         return _stopped(exc, at=at, target=[x, y])
     return {"ok": True, "at": at, "target": [x, y], "points": len(path),
-            "duration_ms": path[-1][2], "human": True}
+            "duration_ms": int(round(_wall_ms(path[-1][2]))), "human": True}
 
 
 def human_press_click(button: int = 1, count: int = 1,
@@ -515,7 +540,7 @@ def human_press_click(button: int = 1, count: int = 1,
                                "button": button})
         if i < count - 1:
             _sleep_ms(rng.randint(*DOUBLE_CLICK_GAP_MS))
-    return press
+    return int(round(_wall_ms(press)))
 
 
 def human_click(x: int, y: int, rng: random.Random | None = None,
@@ -539,8 +564,9 @@ def human_hover(x: int, y: int, settle_ms: int = 350,
     moved = human_move(x, y, rng)
     if not moved.get("ok"):
         return moved
-    _sleep_ms(max(0, settle_ms))
-    moved.update({"settled_ms": settle_ms, "human": True})
+    settle = max(0, settle_ms)
+    _sleep_ms(settle)
+    moved.update({"settled_ms": int(round(_wall_ms(settle))), "human": True})
     return moved
 
 
