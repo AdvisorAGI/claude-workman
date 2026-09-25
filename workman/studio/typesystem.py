@@ -7,10 +7,12 @@ tests/studio pins TYPE to the file: when the owner edits the file, the test fail
 mirror is updated.
 
 Sizes are px on the short side of 1080 (1080x1920, 1080x1080 and 1920x1080 all use 118 px words).
-Fraunces ships as a variable font whose default instance is weight 900, optical size 9; the
-headline instance (weight 600, soft, display optical size) is cut once with fontTools into
-~/.cache/workman-studio/fonts and used by both renderers, so drawtext and Atmosmotion draw the
-same glyphs.
+Both fonts are variable and are used through their axes, never the default instance (Fraunces
+defaults to wght 900, opsz 9, WONK 1) and never a hand-made cut: Fraunces wght 600, opsz = the
+pixel size clamped 9..144, SOFT 50, WONK 0; Geist wght 500 for the CTA, 400 for URL and labels.
+ffmpeg drawtext cannot set axes, so it gets the owner's pinned instances from ~/bin/font-instance
+(files in tools/fonts/instances/, the axes in the name). The Atmosmotion path uses the same pinned
+instances until its text layer takes fontVariation (the follow-up to atmosmotion PR 70).
 
     python -m workman.studio.typesystem [TYPE-SYSTEM.md]    compare the mirror with the file
 """
@@ -28,7 +30,7 @@ from .job import StudioError
 
 MD = Path("~/advisorppc-ads-20260925/TYPE-SYSTEM.md").expanduser()
 
-TYPE = MappingProxyType({
+T_ = {
     "headline_font": "Fraunces.ttf", "headline_weight": 600, "headline_px": 118, "brand_px": 132,
     "brand_word": "AdvisorPPC", "split_px": 1000, "line_pitch_px": 132,
     "sans_font": "Geist.ttf", "cta_px": 54, "url_px": 40, "label_px": 44,
@@ -37,12 +39,13 @@ TYPE = MappingProxyType({
     "led_red": "#EF4444", "led_yellow": "#F5C84C", "led_green": "#10B981",
     "baseline_gap_px": 44, "cta_below_mark_px": 160, "card_hold_s": 3,
     "word_in_frames": 8, "word_rise_px": 6, "word_easing": "easeOutCubic", "word_out_frames": 8,
-    "card_copy_rise_px": 6, "card_copy_frames": 10, "led_step_s": 0.2,
+    "card_copy_rise_px": 6, "card_copy_frames": 10,
     "master_lufs": -14, "master_tp": -1.5,
-})
-# Fraunces axes for the headline instance: the file says weight 600, "optical size soft";
-# read as SOFT 100 at the display optical size (118 px is display type). WONK stays default.
-HEADLINE_AXES = {"wght": 600, "SOFT": 100, "opsz": 144}
+    "headline_wght": 600, "headline_soft": 50, "headline_wonk": 0, "opsz_min": 9, "opsz_max": 144,
+    "cta_wght": 500, "url_wght": 400,
+}
+TYPE = MappingProxyType(T_)
+FONT_INSTANCE = Path(os.environ.get("WORKMAN_FONT_INSTANCE", "~/bin/font-instance")).expanduser()
 # Card layout not fixed by the file, chosen once here: mark 300 px, URL 24 px under the CTA,
 # bead 40 px under the URL, the stack centred on the frame.
 CARD = MappingProxyType({"mark_px": 300, "url_gap_px": 24, "bead_gap_px": 40, "bead_px": 14})
@@ -50,10 +53,6 @@ CARD = MappingProxyType({"mark_px": 300, "url_gap_px": 24, "bead_gap_px": 40, "b
 
 def font_dir() -> Path:
     return Path(os.environ.get("WORKMAN_STUDIO_FONTS", "~/advisorppc-ads-20260925/tools/fonts")).expanduser()
-
-
-def cache_dir() -> Path:
-    return Path(os.environ.get("WORKMAN_STUDIO_CACHE", "~/.cache/workman-studio")).expanduser()
 
 
 def scale(size: list[int] | tuple[int, int]) -> float:
@@ -70,43 +69,53 @@ def hex_rgb(h: str) -> tuple[int, int, int]:
     return int(h[1:3], 16), int(h[3:5], 16), int(h[5:7], 16)
 
 
-def sans_font() -> Path:
-    p = font_dir() / TYPE["sans_font"]
-    if not p.is_file():
-        raise StudioError(f"type system font {p} is missing")
-    return p
+def headline_axes(px: int) -> dict:
+    """Fraunces axes for words drawn at `px`: wght 600, opsz = px clamped 9..144, SOFT 50, WONK 0.
+    Ordered as font-instance names them (wght, opsz, SOFT, WONK)."""
+    return {"wght": T_["headline_wght"], "opsz": max(T_["opsz_min"], min(T_["opsz_max"], int(px))),
+            "SOFT": T_["headline_soft"], "WONK": T_["headline_wonk"]}
 
 
-_INSTANCE = ("import sys\nfrom fontTools.ttLib import TTFont\nfrom fontTools.varLib.instancer import "
-             "instantiateVariableFont\nf = TTFont(sys.argv[1])\naxes = {a.axisTag for a in f['fvar'].axes}\n"
-             "want = {k: float(v) for k, v in (x.split('=') for x in sys.argv[3:])}\n"
-             "instantiateVariableFont(f, {k: v for k, v in want.items() if k in axes}, inplace=True)\n"
-             "f.save(sys.argv[2])\n")
+def sans_axes(role: str) -> dict:
+    """Geist axes: wght 500 for the CTA, 400 for URL and labels."""
+    if role not in ("cta", "url", "label"):
+        raise ValueError(f"Geist role {role!r} is cta, url or label")
+    return {"wght": T_["cta_wght"] if role == "cta" else T_["url_wght"]}
 
 
-def headline_font() -> Path:
-    """Fraunces cut to the headline instance (weight 600, soft, display opsz), cached. Fails closed when
-    fontTools is not available: drawing the variable default would be weight 900, off the type system."""
-    src = font_dir() / TYPE["headline_font"]
-    if not src.is_file():
-        raise StudioError(f"type system font {src} is missing")
-    tag = "-".join(f"{k}{v}" for k, v in HEADLINE_AXES.items())
-    dst = cache_dir() / "fonts" / f"Fraunces-{tag}-{int(src.stat().st_mtime)}.ttf"
+def instance_name(family: str, axes: dict) -> str:
+    """The file ~/bin/font-instance writes for these axes: <Family>-<tag><value>-....ttf (ints unpadded)."""
+    tag = "-".join(f"{k}{int(v) if float(v) == int(v) else v}" for k, v in axes.items()) or "default"
+    return f"{family}-{tag}.ttf"
+
+
+def instance(family: str, axes: dict, timeout: float = 120) -> Path:
+    """The pinned instance for these axes, made by ~/bin/font-instance when it is not there yet.
+    Fails closed: without the instance the renderer would draw the default instance."""
+    if family not in ("Fraunces", "Geist"):
+        raise StudioError(f"type system fonts are Fraunces and Geist, not {family!r}")
+    out = font_dir() / "instances"
+    dst = out / instance_name(family, axes)
     if dst.is_file():
         return dst
-    dst.parent.mkdir(parents=True, exist_ok=True)
-    tmp = dst.with_suffix(".tmp.ttf")
-    args = [str(src), str(tmp), *(f"{k}={v}" for k, v in HEADLINE_AXES.items())]
-    for py in (sys.executable, "/usr/bin/python3"):
-        try:
-            r = subprocess.run([py, "-c", _INSTANCE, *args], capture_output=True, text=True, timeout=120)
-        except (OSError, subprocess.TimeoutExpired):
-            continue
-        if r.returncode == 0 and tmp.is_file():
-            tmp.replace(dst)
-            return dst
-    raise StudioError("cannot cut the Fraunces headline instance: fontTools is not importable "
-                      "(pip install fonttools, or apt install python3-fonttools)")
+    if not FONT_INSTANCE.is_file():
+        raise StudioError(f"{dst.name} is missing and {FONT_INSTANCE} is not installed")
+    args = [str(FONT_INSTANCE), family, *(f"{k}={v}" for k, v in axes.items()), "--out", str(out)]
+    try:
+        r = subprocess.run(args, capture_output=True, text=True, timeout=timeout)
+    except (OSError, subprocess.TimeoutExpired) as e:
+        raise StudioError(f"font-instance {family} {axes} failed: {type(e).__name__}") from e
+    if r.returncode or not dst.is_file():
+        raise StudioError(f"font-instance {family} {axes} exit {r.returncode}: {(r.stdout + r.stderr)[-300:]}")
+    return dst
+
+
+def headline_font(px: int) -> Path:
+    return instance("Fraunces", headline_axes(px))
+
+
+def sans_font(role: str) -> Path:
+    return instance("Geist", sans_axes(role))
 
 
 # ------------------------------------------------------------------ the markdown
@@ -147,7 +156,12 @@ def parse_md(md: str) -> dict:
     out["word_in_frames"], out["word_rise_px"], out["word_easing"], out["word_out_frames"] = \
         int(w[0]), int(w[1]), w[2], int(w[3])
     out["card_copy_rise_px"], out["card_copy_frames"] = _one(r"rise (\d+) px with fade over (\d+) frames", md, int)
-    out["led_step_s"] = _one(r"hard steps, ([\d.]+) s each", md, float)
+    ax = _one(r"\| words on picture, \d+ px \| wght (\d+), opsz \d+ \(= pixel size, cap (\d+)\), SOFT (\d+), "
+              r"WONK (\d+)", md, int)
+    out["headline_wght"], out["opsz_max"], out["headline_soft"], out["headline_wonk"] = ax
+    out["opsz_min"] = _one(r"clamped (\d+)\.\.\d+", md, int)
+    out["cta_wght"] = _one(r"\| card CTA \d+ px \| \| (\d+) \|", md, int)
+    out["url_wght"] = _one(r"\| URL \d+ px, labels \d+ px \| \| (\d+) \|", md, int)
     out["master_lufs"], out["master_tp"] = _one(r"Master (-?\d+) LUFS, TP (-?\d+(?:\.\d+)?)", md, float)
     out["master_lufs"] = int(out["master_lufs"])
     return out

@@ -374,16 +374,20 @@ def _kf(*pts) -> dict:
     return {"kf": [{"at": round(at, 3), "value": round(v, 3), **({"easing": e} if e else {})} for at, v, e in pts]}
 
 
-def plate_comp(words: list[dict], size: list[int], fps: int, end: float, font: str, rise: float) -> dict:
+def plate_comp(words: list[dict], size: list[int], fps: int, end: float, fonts: dict, rise: float) -> dict:
     """White-on-black word plate for engine-native: the same lines, opacity and rise as drawtext, each text
-    box top placed `ink` px above its baseline (the engine's box top is the ink top, measured 2026-09-25)."""
+    box top placed `ink` px above its baseline (the engine's box top is the ink top, measured 2026-09-25).
+    fonts maps px to the pinned Fraunces instance for that px.
+    TODO(atmosmotion-fontvariation): pass the axes (typesystem.headline_axes) on the text layer instead of
+    a pinned instance once the follow-up to atmosmotion PR 70 adds fontVariation."""
     W, H = size
     layers = []
     for n, w in enumerate(words):
         a, b = w["a"] * fps, w["b"] * fps
         i, o = T["word_in_frames"], T["word_out_frames"]
         top = w["baseline"] - w["ink"]
-        layers.append({"id": f"w{n}", "type": "text", "content": w["txt"], "font": "Fraunces", "fontAsset": "headline",
+        layers.append({"id": f"w{n}", "type": "text", "content": w["txt"], "font": "Fraunces",
+                       "fontAsset": f"headline{w['size']}",
                        "size": w["size"], "color": T["words_color"], "align": "center", "in": round(a, 3),
                        "out": round(b, 3),
                        "opacity": _kf((a, 0, None), (a + i, T["words_opacity"], T["word_easing"]),
@@ -393,10 +397,12 @@ def plate_comp(words: list[dict], size: list[int], fps: int, end: float, font: s
     return {"version": "1.0", "meta": {"name": "studio-word-plate"}, "size": {"w": W, "h": H}, "fps": fps,
             "duration": end, "coordSystem": "top-left", "timeUnit": "frames",
             "background": {"kind": "color", "color": "#000000"},
-            "assets": {"headline": {"kind": "font", "family": "Fraunces", "src": font}}, "layers": layers}
+            "assets": {f"headline{px}": {"kind": "font", "family": "Fraunces", "src": str(src)}
+                       for px, src in sorted(fonts.items())}, "layers": layers}
 
 
-def card_comp(card: dict, size: list[int], fps: int, frames: int, mark_png: str, sans: str) -> dict:
+def card_comp(card: dict, size: list[int], fps: int, frames: int, mark_png: str, cta_font: str,
+              url_font: str) -> dict:
     """The dark end card as an engine segment: mark (pre-sized PNG, pasted 1:1), CTA and URL rising 6 px
     with a 10 frame fade from the card's first frame, one emerald bead."""
     L = card_layout(size)
@@ -404,7 +410,7 @@ def card_comp(card: dict, size: list[int], fps: int, frames: int, mark_png: str,
     f, r = T["card_copy_frames"], L["rise"]
 
     def copy(i: str, text: str, y: int, px: int, color: str) -> dict:
-        return {"id": i, "type": "text", "content": text, "font": "Geist", "fontAsset": "sans", "size": px,
+        return {"id": i, "type": "text", "content": text, "font": "Geist", "fontAsset": i, "size": px,
                 "color": color, "align": "center", "opacity": _kf((0, 0, None), (f, 1, T["word_easing"])),
                 "transform": {"x": W / 2, "y": _kf((0, y + r, None), (f, y, T["word_easing"])),
                               "anchor": {"x": 0.5, "y": 0}}}
@@ -413,8 +419,9 @@ def card_comp(card: dict, size: list[int], fps: int, frames: int, mark_png: str,
     return {"version": "1.0", "meta": {"name": "studio-card"}, "size": {"w": W, "h": size[1]}, "fps": fps,
             "duration": frames / fps, "coordSystem": "top-left", "timeUnit": "frames",
             "background": {"kind": "color", "color": T["dark"]},
-            "assets": {"mark": {"kind": "image", "src": mark_png}, "sans": {"kind": "font", "family": "Geist",
-                                                                            "src": sans}},
+            "assets": {"mark": {"kind": "image", "src": mark_png},
+                       "cta": {"kind": "font", "family": "Geist", "src": cta_font},
+                       "url": {"kind": "font", "family": "Geist", "src": url_font}},
             "layers": [{"id": "mark", "type": "image", "asset": "mark", "fit": "contain",
                         "transform": {"x": mk["x"] + mk["px"] / 2, "y": mk["y"] + mk["px"] / 2,
                                       "anchor": {"x": 0.5, "y": 0.5}}},
@@ -456,13 +463,14 @@ def grab(path: Path, frame: int, fps: int, dst: Path, scale: int = 0) -> Path:
     return dst
 
 
-def font_measure(path: Path):
-    """width_of(text, px) and ink(text, px) (baseline to ink top) in one font, cached per size."""
+def font_measure(path_for):
+    """width_of(text, px) and ink(text, px) (baseline to ink top), each px in the font path_for(px)."""
     from PIL import ImageFont
     cache: dict = {}
 
     def face(px: int):
         if px not in cache:
+            path = path_for(px)
             try:
                 cache[px] = ImageFont.truetype(str(path), px)
             except OSError as e:
@@ -626,7 +634,7 @@ def geometry(job: Path, spec: dict) -> tuple[dict, list[str]]:
 
 
 def _words(s: dict, tm: dict, geo: dict) -> list[dict]:
-    width_of, ink = font_measure(ts.headline_font())
+    width_of, ink = font_measure(ts.headline_font)
     words = words_plan(s, tm["onsets"], width_of, {i: g["hz"] for i, g in geo.items() if "hz" in g})
     for w in words:
         w["ink"] = int(round(ink(w["txt"], w["size"])))
@@ -688,15 +696,15 @@ def filtergraph(job: Path, s: dict, geo: dict, words: list[dict], card: Path | N
         labels.append(f"[v{i}]")
     fc.append("".join(labels) + f"concat=n={len(labels)}:v=1:a=0[vcat]")
     m = metrics(s["size"])
-    draws = [] if plate else [drawtext(w, str(ts.headline_font()), fps, m["rise"]) for w in words]
+    draws = [] if plate else [drawtext(w, str(ts.headline_font(w["size"])), fps, m["rise"]) for w in words]
     cidx = next((i for i, x in enumerate(s["shots"]) if kind(x) == "card"), None)
     if cidx is not None and not atmos_card:
-        L, sans, c = card_layout(s["size"]), str(ts.sans_font()), s["shots"][cidx]["card"]
+        L, c = card_layout(s["size"]), s["shots"][cidx]["card"]
         a0, b0 = cuts(s)[cidx][0] / fps, end
-        draws += [card_drawtext(c.get("cta", ""), sans, L["cta"]["px"], L["cta"]["y"], T["card_copy"], a0, b0, fps,
-                                L["rise"]),
-                  card_drawtext(c.get("url", "advisorppc.com"), sans, L["url"]["px"], L["url"]["y"], T["secondary"],
-                                a0, b0, fps, L["rise"])]
+        draws += [card_drawtext(c.get("cta", ""), str(ts.sans_font("cta")), L["cta"]["px"], L["cta"]["y"],
+                                T["card_copy"], a0, b0, fps, L["rise"]),
+                  card_drawtext(c.get("url", "advisorppc.com"), str(ts.sans_font("url")), L["url"]["px"],
+                                L["url"]["y"], T["secondary"], a0, b0, fps, L["rise"])]
     fc.append("[vcat]" + ",".join(draws + ["format=yuv420p"]) + ("[vb]" if plate else "[vout]"))
     if plate:
         # TODO(atmosmotion-alpha): engine-native encodes yuv420p MP4 only, so the words come as a white-on-black
@@ -778,12 +786,14 @@ def render(job: str | Path, spec_name: str = "spec.json", fmt: str = "") -> dict
             c, n = s["shots"][cidx]["card"], cuts(s)[cidx][1] - cuts(s)[cidx][0]
             if atm:
                 mark = card_mark(d, c, s["size"], d / "out" / f"{name}-mark.png")
-                card = atmos(card_comp(c, s["size"], s["fps"], n, str(mark), str(ts.sans_font())),
+                card = atmos(card_comp(c, s["size"], s["fps"], n, str(mark), str(ts.sans_font("cta")),
+                                       str(ts.sans_font("url"))),
                              d / "out" / f"{name}-card.mp4", "opaque")
             else:
                 card = card_plate(d, c, s["size"], d / "out" / f"{name}-card.png")
         if atm and words:
-            plate = atmos(plate_comp(words, s["size"], s["fps"], s["end"], str(ts.headline_font()),
+            fonts = {w["size"]: ts.headline_font(w["size"]) for w in words}
+            plate = atmos(plate_comp(words, s["size"], s["fps"], s["end"], fonts,
                                      metrics(s["size"])["rise"]), d / "out" / f"{name}-plate.mkv", "plate")
         # Master (build_partner): premix at the set levels, then one static gain solved on the premix plus a
         # 4x oversampled limiter. build_series' two-pass loudnorm missed -14 LUFS on programmes near its 3 s
@@ -902,7 +912,7 @@ def contact(strips: list[tuple[str, Path]], dst: Path) -> Path | None:
         return None
     lab = 44
     try:
-        f = ImageFont.truetype(str(ts.sans_font()), 28)
+        f = ImageFont.truetype(str(ts.sans_font("label")), 28)
     except (OSError, StudioError):
         f = ImageFont.load_default()
     sheet = Image.new("RGB", (max(im.width for _, im in rows), sum(im.height + lab for _, im in rows)), "black")

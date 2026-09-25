@@ -27,10 +27,32 @@ def test_brand_word_and_scale():
     assert ts.hex_rgb("#10B981") == (16, 185, 129)
 
 
+def test_axes_follow_the_owner_rule():
+    assert ts.headline_axes(118) == {"wght": 600, "opsz": 118, "SOFT": 50, "WONK": 0}
+    assert ts.headline_axes(200)["opsz"] == 144 and ts.headline_axes(4)["opsz"] == 9     # clamped 9..144
+    assert ts.sans_axes("cta") == {"wght": 500} and ts.sans_axes("url") == ts.sans_axes("label") == {"wght": 400}
+    with pytest.raises(ValueError):
+        ts.sans_axes("headline")
+
+
+def test_instance_name_encodes_the_axes_like_font_instance():
+    assert ts.instance_name("Fraunces", ts.headline_axes(118)) == "Fraunces-wght600-opsz118-SOFT50-WONK0.ttf"
+    assert ts.instance_name("Geist", ts.sans_axes("cta")) == "Geist-wght500.ttf"
+    assert ts.instance_name("Fraunces", {"opsz": 12.5}) == "Fraunces-opsz12.5.ttf"
+
+
 @pytest.mark.skipif(not fonts_present(), reason="type system fonts not on this machine")
-def test_headline_instance_is_weight_600_soft_display():
+def test_pinned_instances_are_the_files_named_for_the_axes():
     from PIL import ImageFont
-    p = ts.headline_font()
-    assert p.is_file() and p == ts.headline_font()            # cached, cut once
-    names = {a["name"] for a in ImageFont.truetype(str(p), 40).get_variation_axes()}
-    assert b"Weight" not in names and b"Softness" not in names and b"Optical Size" not in names
+    for px in (118, 132):
+        p = ts.headline_font(px)
+        assert p.name == ts.instance_name("Fraunces", ts.headline_axes(px)) and p.parent.name == "instances"
+        f = ImageFont.truetype(str(p), px)
+        try:
+            axes = f.get_variation_axes()
+        except OSError:      # a fully pinned instance has no variation tables at all
+            axes = []
+        assert axes == [], axes
+    assert ts.sans_font("cta").name == "Geist-wght500.ttf" and ts.sans_font("url").name == "Geist-wght400.ttf"
+    with pytest.raises(ts.StudioError):
+        ts.instance("Helvetica", {"wght": 400})

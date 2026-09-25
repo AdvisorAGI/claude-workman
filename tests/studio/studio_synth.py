@@ -85,9 +85,14 @@ def build(root: Path, formats: list[str] | None = None, renderer: str = "drawtex
 
 
 def fonts_present() -> bool:
-    """The type system's two font files exist (Fraunces, Geist)."""
+    """The type system's pinned instances exist or can be made (Fraunces, Geist via ~/bin/font-instance)."""
     from workman.studio import typesystem
-    return all((typesystem.font_dir() / typesystem.TYPE[k]).is_file() for k in ("headline_font", "sans_font"))
+    try:
+        typesystem.headline_font(118), typesystem.headline_font(132)
+        typesystem.sans_font("cta"), typesystem.sans_font("url")
+    except Exception:   # noqa: BLE001 - any missing piece means the fonts are not usable here
+        return False
+    return True
 
 
 def canned_transcript() -> dict:

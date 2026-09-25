@@ -153,14 +153,17 @@ def test_card_layout_is_the_dark_stack_with_cta_160_under_the_mark():
 
 def test_plate_and_card_comps_carry_the_type_system():
     w = {"txt": "Look closer.", "a": 1.0, "b": 3.0, "baseline": 916, "size": 118, "ink": 88}
-    comp = a.plate_comp([w], [1080, 1920], 24, 4.0, "/f/Fraunces.ttf", 6.0)
+    comp = a.plate_comp([w], [1080, 1920], 24, 4.0, {118: "/f/Fraunces-wght600-opsz118-SOFT50-WONK0.ttf"}, 6.0)
+    assert comp["assets"]["headline118"]["src"].endswith("opsz118-SOFT50-WONK0.ttf")
     layer = comp["layers"][0]
     assert comp["background"]["color"] == "#000000" and layer["color"] == "#FFFFFF"
     assert layer["opacity"]["kf"][1] == {"at": 32.0, "value": 0.92, "easing": "easeOutCubic"}
     assert layer["opacity"]["kf"][-1]["at"] == 72.0 and layer["opacity"]["kf"][-2]["at"] == 64.0
     ys = layer["transform"]["y"]["kf"]
     assert ys[0]["value"] == 916 - 88 + 6 and ys[1]["value"] == 828
-    card = a.card_comp({"cta": "Free account audit", "url": "advisorppc.com"}, [1080, 1920], 24, 72, "/m.png", "/g.ttf")
+    card = a.card_comp({"cta": "Free account audit", "url": "advisorppc.com"}, [1080, 1920], 24, 72, "/m.png",
+                       "/Geist-wght500.ttf", "/Geist-wght400.ttf")
+    assert card["assets"]["cta"]["src"] == "/Geist-wght500.ttf" and card["assets"]["url"]["src"] == "/Geist-wght400.ttf"
     assert card["background"]["color"] == "#0F1112" and card["duration"] == 3.0
     ids = {x["id"]: x for x in card["layers"]}
     assert ids["cta"]["color"] == "#F5F4EF" and ids["url"]["color"] == "#A8A6A0" and ids["bead"]["fill"] == "#10B981"

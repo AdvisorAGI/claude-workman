@@ -67,9 +67,13 @@ CLI: `python -m workman.studio.voice tts "<text>" out.mp3 | sound "<prompt>" out
 easeOutCubic in with a 6 px rise and 8 frames out, card copy 10 frames with 6 px. Px values
 are on a 1080 short side, so 9:16, 1:1 and 16:9 all draw 118 px words. `parse_md`/`drift`
 read the same values from the markdown; `tests/studio/test_studio_typesystem.py` fails when
-the file changes and the mirror does not. `headline_font()` cuts Fraunces to weight 600,
-SOFT 100, opsz 144 with fontTools once into `~/.cache/workman-studio/fonts` (the variable
-default is weight 900, opsz 9); without fontTools it fails closed.
+the file changes and the mirror does not. Both fonts are variable and used through their axes:
+Fraunces wght 600, opsz = pixel size clamped 9..144, SOFT 50, WONK 0; Geist wght 500 (CTA) and
+400 (URL, labels). `headline_font(px)` and `sans_font(role)` return the owner's pinned instances
+from `~/bin/font-instance` (`tools/fonts/instances/`, axes in the name, e.g.
+`Fraunces-wght600-opsz118-SOFT50-WONK0.ttf`), making a missing one on first use; never the
+default instance and never a cut of our own. Atmosmotion gets the same instances until its text
+layer takes `fontVariation` (TODO in `plate_comp`).
 CLI: `python -m workman.studio.typesystem [TYPE-SYSTEM.md]` prints the drift.
 
 ## grok (`grok.py`)
