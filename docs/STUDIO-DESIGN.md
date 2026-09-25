@@ -70,3 +70,8 @@ word/grapheme stagger in engine-native text-anim.ts. GAP: encoder is yuv420p MP4
 (ProRes 4444 / VP9 alpha / rgba PNG sequence declared but not wired). Transparent type therefore = render
 white-on-black plate and alphamerge in ffmpeg until the encoder gap is closed (a Studio follow-up ticket).
 Type spec binding on every render: ~/advisorppc-ads-20260925/TYPE-SYSTEM.md.
+
+## Rule: uncommitted work is ours (owner 2026-09-25)
+A checkout with uncommitted changes is never "someone else's, leave it". The builder that finds it
+reviews the diff, runs the gates, fixes only what blocks them, commits with a clear message and
+pushes the branch, then builds on top of that commit. Latest code lives in git, not in a folder.
