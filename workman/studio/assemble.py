@@ -45,11 +45,13 @@ from pathlib import Path
 
 from . import typesystem as ts
 from . import voice
+from .inspect import onset_misses, read_transcript
 from .job import StudioError, cool_down, duration, ff, ffmpeg_cmd, probe, render_lock, resolve_job, sh, wait_turn
 
 T = ts.TYPE
 DEFAULTS = {"fps": 24, "size": [1080, 1920], "renderer": "drawtext", "hold": voice.HOLD, "read_min": voice.READ_MIN,
-            "bed_lufs": -26.0, "chime_peak": -12.0, "onset_ok": [3.0, 10.0], "green_ok": [20, 200]}
+            "bed_lufs": -26.0, "chime_peak": -12.0, "onset_ok": [3.0, 10.0], "green_ok": [20, 200],
+            "onset_lead": 0.0}
 TYPE_KEYS = {"fonts", "word_size", "word_gap", "split_w", "fade", "colors", "font"}   # refused in a spec
 RENDERERS = ("drawtext", "atmosmotion")
 MAX_SHOTS, MAX_LINES, MAX_END = 12, 8, 120.0
@@ -168,6 +170,7 @@ def validate(spec: dict) -> list[str]:
                     errs.append(f"shot {i}: card {key} breaks the copy rules or needs escaping")
         if k == "logo" and i == 0:
             errs.append("shot 0 cannot be the logo shot (the chime would land before any picture)")
+    errs += mark_errors(shots)
     lines = s.get("vo") or []
     if len(lines) > MAX_LINES:
         errs.append(f"at most {MAX_LINES} VO lines")
@@ -193,10 +196,29 @@ def validate(spec: dict) -> list[str]:
                 errs.append(f"vo {n}: {p!r} needs drawtext escaping")
             if voice.copy_problem(p):
                 errs.append(f"vo {n}: copy rule in words {p!r}")
+    if not 0.0 <= float(s["onset_lead"]) <= 0.3:
+        errs.append("onset_lead must be 0..0.3 s")
     for f in s.get("formats", []):
         if f not in FORMATS:
             errs.append(f"format {f!r} not in {sorted(FORMATS)}")
     return errs
+
+
+def mark_errors(shots: list[dict]) -> list[str]:
+    """The card's mark is the same family as the logo shot before it (typesystem.LOGO_FAMILIES): the green
+    mark after a hold-green clip, the plain Ai after a dissolve clip; with no logo shot, the plain Ai."""
+    logo = next((s_["logo"] for s_ in shots if kind(s_) == "logo"), None)
+    card = next((s_["card"] for s_ in shots if kind(s_) == "card"), None)
+    if card is None or not card.get("mark"):
+        return []
+    want = ts.logo_family(str(logo)) if logo else "plain"
+    got = ts.mark_family(str(card["mark"]))
+    if logo and want is None:
+        return [f"logo clip {logo!r} is in no family of typesystem.LOGO_FAMILIES; add it there first"]
+    if got != want:
+        return [f"card mark {card['mark']!r} is {got or 'no known Ai mark'}, but the logo shot "
+                f"{'ends on the ' + want + ' mark' if logo else 'is absent, so the card takes the plain Ai'}"]
+    return []
 
 
 def lines_for(txt: str, width_of, split_w: float) -> list[str]:
@@ -360,6 +382,21 @@ def source_shot(spec: dict, frame: int) -> int | None:
     return None
 
 
+def cut_seen(diffs: list[float], k: int, skip: set[int] = frozenset(), ratio: float = 1.8,
+             floor: float = 1.0) -> tuple[bool, float]:
+    """Is diffs[k] (mean abs luma change across a planned cut) a hard cut? It must reach `ratio` times the
+    shot's own frame-to-frame change, the larger median of the changes before and after it (the other cuts
+    in `skip` excluded), and at least `floor`. Measured on the smoke render: a slow graphite shot (1.1) cut
+    to a moving banknote shot (15.7) changed 35.0 across the cut; a one-frame-late cut reads about 1x.
+    ffmpeg scene scores (> 0.3) missed every cut of that dark footage (0.14 to 0.28)."""
+    def median(xs: list[float]) -> float:
+        xs = sorted(xs)
+        return xs[len(xs) // 2] if xs else 0.0
+    side = max(median([d for i, d in enumerate(diffs) if i < k and i not in skip]),
+               median([d for i, d in enumerate(diffs) if i > k and i not in skip]))
+    return diffs[k] >= max(floor, ratio * side), round(side, 3)
+
+
 def onset_frames(a: float, fps: int) -> tuple[int, int]:
     """(frame 0.1 s before the onset, strictly before it; frame 0.4 s after)."""
     n = int((a - 0.1) * fps)
@@ -511,19 +548,27 @@ def takes(job: Path, spec: dict, generate: bool, tts=voice.tts) -> list[dict]:
     return chosen
 
 
-def timing(spec: dict, chosen: list[dict]) -> dict:
+def timing(spec: dict, chosen: list[dict], samples_of=voice.pcm) -> dict:
+    """Placements and on-screen onsets per VO line. A phrase appears at max(alignment onset, first
+    audible sample after it) + onset_lead: the alignment alone runs ahead of the voice."""
     cs, lines, onsets = cuts(spec), [], []
+    lead = float(with_defaults(spec)["onset_lead"])
     for n, (L, t) in enumerate(zip(spec.get("vo", []), chosen, strict=True)):
         al = t["meta"]["alignment"]
         place = voice.placement(float(L["at"]), al)
         a, b = voice.speech_span(al)
-        onsets.append([round(place + voice.phrase_onset(al, p), 3) for p in L["words"]])
+        pcm = samples_of(t["mp3"])
+        aligned = [voice.phrase_onset(al, p) for p in L["words"]]
+        heard = [voice.audible_onset(pcm, 48000, x) for x in aligned]
+        onsets.append([round(place + voice.text_onset(x, h, lead), 3) for x, h in zip(aligned, heard, strict=True)])
         i = L["shot"]
         lines.append({"n": n + 1, "take": t["k"], "text": t["text"], "spoken": voice.spoken(t["text"]), "mp3": t["mp3"],
                       "place": round(place, 3), "mp3_dur": round(t["dur"], 3), "vo_dur": t["occ"],
                       "speech": [round(place + a, 3), round(place + b, 3)], "speech_dur": round(b - a, 3),
                       "onset": onsets[-1][0], "read": t["fit"][1], "wps": round(voice.wps(t["text"], al), 2),
                       "pauses": voice.pauses(al),
+                      "onsets_aligned": [round(place + x, 3) for x in aligned],
+                      "onsets_heard": [None if h is None else round(place + h, 3) for h in heard],
                       "shot": [round(cs[i][0] / spec["fps"], 3), round(cs[i][1] / spec["fps"], 3)]})
     return {"lines": lines, "onsets": onsets}
 
@@ -824,6 +869,40 @@ def render(job: str | Path, spec_name: str = "spec.json", fmt: str = "") -> dict
             "timing": str(d / "out" / f"{name}.timing.json")}
 
 
+def luma_diffs(raw: bytes, w: int, h: int) -> list[float]:
+    """Mean absolute difference between consecutive gray frames of a rawvideo byte stream."""
+    size = w * h
+    frames = [raw[k * size:(k + 1) * size] for k in range(len(raw) // size)]
+    return [sum(abs(x - y) for x, y in zip(a, b, strict=True)) / size for a, b in zip(frames, frames[1:], strict=False)]
+
+
+def planned_cuts(path: Path, spec: dict, width: int = 270, pad: int = 5) -> list[dict]:
+    """Each planned cut checked on the render itself: the luma change across it against the changes in the
+    `pad` frames either side (cut_seen), instead of trusting a scene score."""
+    W, H = spec["size"]
+    fps, h = spec["fps"], even(width * H / W)
+    bounds = [c1 for _, c1 in cuts(spec)][:-1]
+    out = []
+    for c in bounds:
+        first = max(0, c - pad)
+        try:
+            raw = subprocess.run(ffmpeg_cmd(["-v", "error", "-ss", f"{max(0.0, (first - 0.25) / fps):.4f}",
+                                             "-i", str(path), "-frames:v", str(2 * pad),
+                                             "-vf", f"scale={width}:{h},format=gray", "-f", "rawvideo", "-"]),
+                                 capture_output=True, timeout=300).stdout
+        except subprocess.TimeoutExpired as e:
+            raise StudioError(f"decoding frames around the cut at {c} timed out") from e
+        diffs = luma_diffs(raw, width, h)
+        k = c - first - 1
+        if not 0 <= k < len(diffs):
+            out.append({"t": round(c / fps, 3), "frame": c, "seen": False, "why": "frames not decoded"})
+            continue
+        skip = {b_ - first - 1 for b_ in bounds if b_ != c}
+        seen, med = cut_seen(diffs, k, skip)
+        out.append({"t": round(c / fps, 3), "frame": c, "diff": round(diffs[k], 3), "median": med, "seen": seen})
+    return out
+
+
 def band_diff(a: Path, b: Path, y0: int, y1: int) -> float:
     """Mean absolute luma difference of rows y0..y1 between two same-size frames."""
     from PIL import Image
@@ -893,13 +972,20 @@ def verify(job: str | Path, spec_name: str = "spec.json", fmt: str = "") -> dict
     if cidx is not None and (cs[cidx][1] - cs[cidx][0]) / fps < T["card_hold_s"]:
         deviations.append(f"card held {(cs[cidx][1] - cs[cidx][0]) / fps:.2f}s, TYPE-SYSTEM.md holds it "
                           f"{T['card_hold_s']}s")
+    tr = d / "out" / f"{name}.inspect" / "transcript.txt"
+    heard = read_transcript(tr.read_text()) if tr.is_file() else []
+    clock = {"source": "scribe", "misses": onset_misses(tm["words"], heard)} if heard else \
+        {"source": "none", "note": "no Scribe transcript yet; studio_inspect gives the independent clock"}
+    cut_check = planned_cuts(out, s)
     res = {"name": name, "out": str(out), "renderer": tm.get("renderer", "drawtext"),
+           "onset_clock": clock, "cuts": cut_check,
            "probe": probe_errors(probe(out), W, H, fps, s["end"]), "onsets": onsets,
            "vo": vo_errors(tm["lines"]), "green": green, "copy": copy, "strip": str(strip_path),
            "loudness": {"integrated": whole[0], "true_peak": whole[1], "errors": voice.loudness_errors(*whole)},
            "deviations": deviations}
     res["ok"] = not (res["probe"] or res["vo"] or res["loudness"]["errors"] or res["copy"]) \
-        and all(o["ok"] for o in onsets) and (green is None or green["ok"])
+        and all(o["ok"] for o in onsets) and (green is None or green["ok"]) \
+        and not clock.get("misses") and all(c["seen"] for c in cut_check)
     (d / "review" / f"{name}_verify.json").write_text(json.dumps(res, indent=1))
     return res
 

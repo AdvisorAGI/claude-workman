@@ -86,10 +86,44 @@ def format_transcript(d: dict) -> str:
     return "\n".join(out) + "\n"
 
 
-def transcript_words(d: dict) -> list[tuple[float, float, str]]:
-    """(start, end, word) for spoken words only."""
-    return [(float(w.get("start", 0)), float(w.get("end", 0)), str(w.get("text", "")))
-            for w in d.get("words", []) if w.get("type") == "word"]
+def letters(text: str) -> str:
+    """Only letters and digits, lowercased: 'AdvisorPPC' and 'Advisor PPC' compare equal."""
+    return re.sub(r"[^a-z0-9]", "", text.lower())
+
+
+def read_transcript(text: str) -> list[tuple[float, str]]:
+    """(start, word) from a transcript.txt this module wrote."""
+    out = []
+    for ln in text.splitlines():
+        m = re.match(r"\s*([\d.]+)-\s*[\d.]+\s+word\s+(.+)$", ln)
+        if m:
+            out.append((float(m.group(1)), m.group(2).strip()))
+    return out
+
+
+SCRIBE_EARLY = 0.075   # Scribe word starts sat 0.008 and 0.055 s after the acoustic onset (smoke test takes)
+
+
+def onset_misses(words: list[dict], heard: list[tuple[float, str]], late: float = 0.1,
+                 early: float = SCRIBE_EARLY) -> list[str]:
+    """Scribe as an independent clock: every on-screen phrase appears at most `late` s after its first word
+    is heard and never before it, allowing `early` s for Scribe's own word-start jitter (its starts landed
+    0.008 and 0.055 s after the measured acoustic onset). `words` are timing.json word lines, each phrase once."""
+    bad, k, seen = [], 0, set()
+    for w in words:
+        key = (w.get("vo"), w["a"])
+        if key in seen:
+            continue
+        seen.add(key)
+        first = letters(w["txt"].split()[0])
+        j = next((j for j in range(k, len(heard)) if letters(heard[j][1]) == first), None)
+        if j is None:
+            bad.append(f"{w['txt']!r}: first word not heard")
+            continue
+        k, t = j + 1, heard[j][0]
+        if not -early <= w["a"] - t <= late:
+            bad.append(f"{w['txt']!r} on screen {w['a']:.3f}s, heard {t:.3f}s")
+    return bad
 
 
 # ------------------------------------------------------------------ io

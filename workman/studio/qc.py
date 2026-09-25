@@ -25,6 +25,7 @@ from pathlib import Path
 
 from . import voice
 from .assemble import cuts, kind, load, with_defaults
+from .inspect import letters, onset_misses, read_transcript
 from .job import StudioError
 
 FACTS = Path(os.environ.get("WORKMAN_STUDIO_FACTS", "~/advisorppc-ads-20260925/refs/FACTS.md")).expanduser()
@@ -103,69 +104,44 @@ def fact_rows(spec: dict, docs: dict[str, str], known: set[str], conflicts: set[
     return rows
 
 
-def letters(text: str) -> str:
-    """Only letters and digits, lowercased: 'AdvisorPPC' and 'Advisor PPC' compare equal."""
-    return re.sub(r"[^a-z0-9]", "", text.lower())
-
-
-def transcript_words(text: str) -> list[tuple[float, str]]:
-    """(start, word) from a transcript.txt written by studio.inspect."""
-    out = []
-    for ln in text.splitlines():
-        m = re.match(r"\s*([\d.]+)-\s*[\d.]+\s+word\s+(.+)$", ln)
-        if m:
-            out.append((float(m.group(1)), m.group(2).strip()))
-    return out
-
-
 def transcript_rows(spec: dict, timing: dict, transcript: str) -> list[dict]:
-    """Spoken words equal the script; each on-screen phrase appears 0..0.1 s after its spoken onset."""
-    words = transcript_words(transcript)
+    """Spoken words equal the script; each phrase appears at most 0.1 s after its spoken onset and not before
+    it beyond Scribe's 0.075 s jitter (inspect.onset_misses)."""
+    words = read_transcript(transcript)
     if not words:
         why = transcript.strip().splitlines()[0] if transcript.strip() else "no transcript.txt"
         return [row("Words spoken equal the script (transcript)", None, why, "sound"),
                 row("Words on screen land on the spoken onset (transcript)", None, why, "editor")]
     said, script = letters(" ".join(w for _, w in words)), letters(" ".join(voice.spoken(L["text"])
                                                                            for L in spec.get("vo", [])))
-    rows = [row("Words spoken equal the script (transcript)", said == script,
-                f"transcript {said[:80]!r} vs script {script[:80]!r}", "sound")]
-    bad, k, seen = [], 0, set()
-    for w in timing.get("words", []):
-        key = (w.get("vo"), w["a"])
-        if key in seen:
-            continue
-        seen.add(key)
-        first = letters(w["txt"].split()[0])
-        j = next((j for j in range(k, len(words)) if letters(words[j][1]) == first), None)
-        if j is None:
-            bad.append(f"{w['txt']!r}: first word not heard")
-            continue
-        k, t = j + 1, words[j][0]
-        if not 0 <= w["a"] - t <= 0.1:
-            bad.append(f"{w['txt']!r} on screen {w['a']:.3f}s, spoken {t:.3f}s")
-    rows.append(row("Words on screen land on the spoken onset (transcript)", not bad,
-                    "; ".join(bad) or "every phrase within 0..0.1 s after its spoken word", "editor"))
-    return rows
+    bad = onset_misses(timing.get("words", []), words)
+    return [row("Words spoken equal the script (transcript)", said == script,
+                f"transcript {said[:80]!r} vs script {script[:80]!r}", "sound"),
+            row("Words on screen land on the spoken onset (transcript)", not bad,
+                "; ".join(bad) or "every phrase on its spoken word (-0.075..+0.1 s)", "editor")]
 
 
 def parse_cuts(text: str) -> list[float]:
     return [float(m.group(1)) for m in re.finditer(r"^\s*([\d.]+) s\s+score", text, re.M)]
 
 
-def cut_rows(spec: dict, detected: list[float]) -> list[dict]:
-    """Detected hard cuts equal the planned shot boundaries within one frame; no cut inside a shot."""
+def cut_rows(spec: dict, detected: list[float], planned: list[dict] | None) -> list[dict]:
+    """Planned cuts: seen on the render's own frames (verify's frame-difference check, 1 frame). Unplanned
+    cuts: any scene-detected cut more than one frame from a planned one."""
     fps = spec["fps"]
-    planned = [c1 / fps for _, c1 in cuts(spec)][:-1]
+    plan_t = [c1 / fps for _, c1 in cuts(spec)][:-1]
     tol = 1 / fps + 1e-6
-    extra = [t for t in detected if not any(abs(t - p) <= tol for p in planned)]
-    missing = [round(p, 3) for p in planned if not any(abs(t - p) <= tol for t in detected)]
-    ev = f"planned {[round(p, 3) for p in planned]} detected {detected}"
-    # A missing detection is a WARN: scene detection (score > 0.3) cannot see a cut between two similar
-    # frames, e.g. the black logo shot into the dark #0F1112 card. An unplanned cut is always a FAIL.
-    return [row("Cuts: every planned cut is a detected hard cut (1 frame)", not missing,
-                f"not detected {missing} (similar frames either side? check frames.jpg); {ev}" if missing else ev,
-                "editor", warn=True),
-            row("Cuts: no cut inside a shot", not extra, f"unplanned {extra}" if extra else ev, "editor")]
+    extra = [t for t in detected if not any(abs(t - p) <= tol for p in plan_t)]
+    if planned is None:
+        first = row("Cuts: every planned cut is a hard cut on the render", None,
+                    "verify.json has no frame-difference check; re-run verify", "editor")
+    else:
+        missed = [f"{c['t']}s change {c.get('diff')} vs median {c.get('median')}" for c in planned if not c["seen"]]
+        first = row("Cuts: every planned cut is a hard cut on the render", not missed,
+                    "; ".join(missed) or f"{len(planned)} cuts, each at least 1.8x the shot's frame-to-frame change",
+                    "editor")
+    return [first, row("Cuts: no cut inside a shot", not extra,
+                       f"unplanned {extra}" if extra else f"scene cuts {detected} all on the plan", "editor")]
 
 
 def verify_rows(v: dict, tp_max: float = TP_MAX) -> list[dict]:
@@ -264,7 +240,7 @@ def qc(job: str | Path, name: str = "", spec_name: str = "spec.json", eye: dict 
     rows = copy_rows(s, docs) + fact_rows(s, docs, known, conflicts, str(facts_path)) + verify_rows(v, tp_max)
     cuts_txt = insp / "cuts.txt"
     if cuts_txt.is_file():
-        rows += cut_rows(s, parse_cuts(cuts_txt.read_text()))
+        rows += cut_rows(s, parse_cuts(cuts_txt.read_text()), v.get("cuts"))
     else:
         rows.append(row("Cuts: detected cuts match the plan", None, f"no {cuts_txt}; run studio_inspect", "editor"))
     tr = insp / "transcript.txt"

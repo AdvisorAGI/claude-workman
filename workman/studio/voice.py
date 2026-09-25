@@ -171,6 +171,30 @@ def audible_end(samples, rate: int, floor_db: float = VO_FLOOR, win: float = 0.0
     raise ValueError("take is silent")
 
 
+ONSET_FLOOR_DB, ONSET_SEARCH = -35.0, 0.5
+
+
+def audible_onset(samples, rate: int, start: float, floor_db: float = ONSET_FLOOR_DB,
+                  search: float = ONSET_SEARCH, win: float = 0.01) -> float | None:
+    """Seconds to where the voice is first heard at or after `start`: the first 10 ms window (5 ms hop)
+    whose RMS reaches floor_db (s16 full scale), then its first sample at that level. Looks at most `search`
+    s ahead; None when nothing is heard there. ElevenLabs alignment starts ran 0.065 and 0.092 s ahead of
+    this on the two Brian takes of the smoke test (2026-09-25)."""
+    lim = 10 ** (floor_db / 20) * 32768
+    n = max(1, int(rate * win))
+    k0, k1 = max(0, int(round(start * rate))), min(len(samples), int(round((start + search) * rate)))
+    for k in range(k0, max(k0, k1 - n + 1), max(1, n // 2)):
+        seg = samples[k:k + n]
+        if (sum(q * q for q in seg) / len(seg)) ** 0.5 >= lim:
+            return next(j / rate for j in range(k, k + n) if abs(samples[j]) >= lim)
+    return None
+
+
+def text_onset(aligned: float, audible: float | None, lead: float = 0.0) -> float:
+    """When on-screen words appear: never before the voice is heard, max(alignment, audible) + lead."""
+    return round(max(aligned, aligned if audible is None else audible) + lead, 3)
+
+
 def attack_time(samples, rate: int, frac: float = 0.1) -> float:
     """Seconds to the first sample reaching `frac` of the peak: where a chime is heard to start."""
     peak = max((abs(s) for s in samples), default=0)

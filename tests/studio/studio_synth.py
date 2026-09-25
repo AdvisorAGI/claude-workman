@@ -43,9 +43,10 @@ def spec(formats: list[str] | None = None, renderer: str = "drawtext") -> dict:
     return {"name": NAME, "fps": 24, "size": [1080, 1920], "end": 3.0, "renderer": renderer,
             "shots": [{"clip": "clips/a.mp4", "from": 0.0, "end_frame": 32, "horizon": 0.5},
                       {"clip": "clips/b.mp4", "from": 0.25, "end_frame": 60, "horizon": 0.55},
-                      {"logo": "clips/logo.mp4", "end_frame": 66},
+                      {"logo": "clips/logo-led-signal-clean.mp4", "end_frame": 66},
                       {"card": {"cta": "Free account audit", "url": "advisorppc.com",
-                                "mark": "stills/logo.png", "facts": ["F12"]}, "end_frame": 72}],
+                                "mark": "stills/ai-logo-3d-dark-green-9x16.png", "facts": ["F12"]},
+                       "end_frame": 72}],
             "vo": [{"shot": 0, "at": 0.1, "text": "Look closer.", "words": ["Look closer."], "opinion": True},
                    {"shot": 1, "at": 1.4, "text": "Every dollar counts.", "words": ["Every dollar counts."],
                     "facts": ["F01"]}],
@@ -64,7 +65,7 @@ def build(root: Path, formats: list[str] | None = None, renderer: str = "drawtex
     box = "x=840:y=484:w=240:h=120:t=fill"
     _ff(["-f", "lavfi", "-i", "color=c=black:s=1920x1088:r=24:d=1",
          "-vf", f"drawbox={box}:color=red:enable='lt(n,3)',drawbox={box}:color=0x00C040:enable='gte(n,3)'",
-         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(job / "clips/logo.mp4")])
+         "-c:v", "libx264", "-pix_fmt", "yuv420p", str(job / "clips/logo-led-signal-clean.mp4")])
     _ff(["-f", "lavfi", "-i", "anoisesrc=d=4:c=pink:a=0.2,lowpass=f=400", "-ac", "2", "-ar", "44100",
          str(job / "audio/bed.mp3")])
     _ff(["-f", "lavfi", "-i", "sine=f=1320:d=0.6,afade=t=out:st=0.05:d=0.55", "-ar", "44100",
@@ -74,7 +75,7 @@ def build(root: Path, formats: list[str] | None = None, renderer: str = "drawtex
         (job / f"audio/{NAME}_vo{n}_0.json").write_text(json.dumps(
             {"text": text, "voice": "synthetic", "alignment": alignment(text, 0.05, dur - 0.05)}))
     from PIL import Image
-    Image.new("RGBA", (64, 64), (245, 244, 239, 255)).save(job / "stills/logo.png")
+    Image.new("RGBA", (64, 64), (245, 244, 239, 255)).save(job / "stills/ai-logo-3d-dark-green-9x16.png")
     (job / "refs/FACTS.md").write_text("# facts\n\n| ID | Fact | Source |\n|---|---|---|\n"
                                        "| F01 | A fact. | S1 |\n| F12 | Free audit. | S2 |\n\n"
                                        "## Conflicts between pages\n- nothing cited here\n")

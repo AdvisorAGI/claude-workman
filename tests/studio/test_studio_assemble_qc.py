@@ -199,13 +199,46 @@ def test_fact_rows_unknown_ids_fail_conflicts_warn_untraced_numbers_fail():
     assert rows["Claims: every VO line has a fact ID or is marked opinion"] == "FAIL"
 
 
-def test_cut_rows_one_frame_tolerance_and_no_cut_inside_a_shot():
+def test_cut_rows_use_the_frame_check_for_planned_cuts_and_scenes_for_extra_ones():
     s = spec()
     planned = [32 / 24, 60 / 24, 66 / 24]
-    ok = qc.cut_rows(s, [round(t + 0.03, 3) for t in planned])
+    seen = [{"t": round(t, 3), "seen": True, "diff": 40.0, "median": 0.2} for t in planned]
+    ok = qc.cut_rows(s, [round(planned[0] + 0.03, 3)], seen)          # scene detector saw only one: fine
     assert [r["result"] for r in ok] == ["PASS", "PASS"]
-    bad = qc.cut_rows(s, planned[:2] + [2.0])
-    assert [r["result"] for r in bad] == ["WARN", "FAIL"]      # undetectable cut warns, extra cut fails
+    missed = [dict(seen[0], seen=False), *seen[1:]]
+    bad = qc.cut_rows(s, planned[:2] + [2.0], missed)
+    assert [r["result"] for r in bad] == ["FAIL", "FAIL"]              # a planned cut not on the frames, an extra
+    assert qc.cut_rows(s, [], None)[0]["result"] == "PENDING"
+
+
+def test_cut_seen_is_relative_to_the_shots_own_motion():
+    smoke = [1.1, 1.0, 1.1, 1.1, 35.0, 15.7, 15.9, 15.6, 15.7]     # slow shot cut to a moving one (smoke render)
+    assert a.cut_seen(smoke, 4) == (True, 15.7)
+    late = [1.1, 1.0, 1.1, 1.1, 1.0, 35.0, 15.9, 15.6, 15.7]       # the render cut one frame after the plan
+    assert a.cut_seen(late, 4)[0] is False
+    assert a.cut_seen([0.0, 0.0, 0.6, 0.0], 2)[0] is False         # under the 1.0 floor on a static shot
+    assert a.cut_seen([0.1, 9.0, 0.1, 8.0, 0.1], 1, skip={3}) == (True, 0.1)   # the other cut is not motion
+    raw = bytes([0] * 4 + [10] * 4 + [10] * 4)
+    assert a.luma_diffs(raw, 2, 2) == [10.0, 0.0]
+
+
+def test_card_mark_must_match_the_logo_family():
+    s = studio_synth.spec()
+    assert a.mark_errors(s["shots"]) == []
+    hexmark = copy.deepcopy(s)
+    hexmark["shots"][3]["card"]["mark"] = "logo-kit/stills/transparent-vector/hex-mark-offwhite-2048.png"
+    assert "no known Ai mark" in a.mark_errors(hexmark["shots"])[0]
+    plain = copy.deepcopy(s)
+    plain["shots"][3]["card"]["mark"] = "logo-kit/stills/transparent-vector/ai-plain-flat-offwhite-9x16.png"
+    assert "ends on the hold-green mark" in a.mark_errors(plain["shots"])[0]
+    plain["shots"][2]["logo"] = "logo-kit/video/dark/status-dissolve/ai-logo-led-dark-9x16-dissolve.mp4"
+    assert a.mark_errors(plain["shots"]) == []
+    unknown = copy.deepcopy(s)
+    unknown["shots"][2]["logo"] = "clips/my-logo.mp4"
+    assert "no family" in a.mark_errors(unknown["shots"])[0]
+    nologo = copy.deepcopy(s)
+    del nologo["shots"][2]
+    assert "plain Ai" in a.mark_errors(nologo["shots"])[0]
     assert qc.parse_cuts("1.333 s  score 0.64\n2.500 s  score 1.00\n") == [1.333, 2.5]
 
 
@@ -216,7 +249,7 @@ def test_transcript_rows_compare_letters_and_onsets():
     assert [r["result"] for r in qc.transcript_rows(spec(), tm, tr)] == ["PASS", "PASS"]
     late = {"words": [{"txt": "Look closer.", "a": 0.25, "vo": 0}]}
     assert qc.transcript_rows(spec(), late, tr)[1]["result"] == "FAIL"
-    early = {"words": [{"txt": "Look closer.", "a": 0.05, "vo": 0}]}
+    early = {"words": [{"txt": "Look closer.", "a": 0.0, "vo": 0}]}
     assert qc.transcript_rows(spec(), early, tr)[1]["result"] == "FAIL"   # never before the voice
     assert [r["result"] for r in qc.transcript_rows(spec(), tm, "")] == ["PENDING", "PENDING"]
     assert qc.letters("AdvisorPPC shows") == qc.letters("Advisor PPC shows.")
@@ -257,7 +290,12 @@ def test_inspect_parsers():
     tr = ins.format_transcript({"language_code": "eng", "text": "Hi.", "words": [
         {"start": 0.1, "end": 0.3, "type": "word", "text": "Hi."}, {"type": "spacing", "text": " "}]})
     assert tr == "language: eng | text: Hi.\n  0.10-  0.30  word   Hi.\n"
-    assert qc.transcript_words(tr) == [(0.1, "Hi.")]
+    assert ins.read_transcript(tr) == [(0.1, "Hi.")]
+    words = [{"txt": "Hi there", "a": 0.15, "vo": 0}, {"txt": "Hi there", "a": 0.15, "vo": 0}]
+    assert ins.onset_misses(words, [(0.1, "Hi.")]) == []
+    early = ins.onset_misses([{"txt": "Hi", "a": 0.0, "vo": 0}], [(0.1, "Hi.")])
+    assert early == ["'Hi' on screen 0.000s, heard 0.100s"]
+    assert ins.onset_misses([{"txt": "Hi", "a": 0.05, "vo": 0}], [(0.1, "Hi.")]) == []   # inside Scribe jitter
 
 
 def test_spec_json_round_trips():

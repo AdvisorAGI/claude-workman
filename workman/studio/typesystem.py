@@ -45,6 +45,28 @@ T_ = {
     "cta_wght": 500, "url_wght": 400,
 }
 TYPE = MappingProxyType(T_)
+# Which end-card mark may follow which logo shot (TYPE-SYSTEM.md "Logo signal", logo-kit/): the
+# status-hold-green clips end on the green signal, so the card shows the green mark; the status clips
+# whose hexagon dissolves end on the plain Ai, so the card shows the plain mark. Matched on the file
+# path, first family wins; a clip or mark that matches no family fails validation.
+LOGO_FAMILIES = (
+    ("plain", (r"dissolve", r"/status-plain/", r"ai-logo-led-.*-plain"),
+     (r"ai-plain-", r"ai-logo-3d-[a-z]+-plain-")),
+    ("hold-green", (r"logo-led-signal-clean\.mp4$", r"/status-hold-green/", r"ai-logo-led-[a-z0-9-]+\.(mp4|mov|webm)$"),
+     (r"ai-logo-3d-[a-z]+-green-", r"ai-lockup-led-green-")),
+)
+
+
+def logo_family(clip: str) -> str | None:
+    """The family of a logo shot's clip, or None."""
+    return next((f for f, clips, _ in LOGO_FAMILIES if any(re.search(p, clip) for p in clips)), None)
+
+
+def mark_family(mark: str) -> str | None:
+    """The family of an end-card mark image, or None."""
+    return next((f for f, _, marks in LOGO_FAMILIES if any(re.search(p, mark) for p in marks)), None)
+
+
 FONT_INSTANCE = Path(os.environ.get("WORKMAN_FONT_INSTANCE", "~/bin/font-instance")).expanduser()
 # Card layout not fixed by the file, chosen once here: mark 300 px, URL 24 px under the CTA,
 # bead 40 px under the URL, the stack centred on the frame.

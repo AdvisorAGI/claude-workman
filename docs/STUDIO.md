@@ -56,7 +56,12 @@ IO: `eleven(path, body)`, `tts(text, mp3, json, voice=BRIAN, previous_text, next
 Settings are the worked jobs': Brian `nPczCjzI2devNBz1zQrb`, `eleven_multilingual_v2`,
 stability 0.55, similarity 0.75, style 0.15; takes in preference order `vo_texts` (0.6 s
 breath at each full stop, 0.3 s, none); a take is placed so its first letter lands on `at`
-and trimmed at its last window above -60 dBFS plus 0.1 s.
+and trimmed at its last window above -60 dBFS plus 0.1 s. On-screen words appear at
+`text_onset` = max(alignment onset, `audible_onset`: the first 10 ms window at -35 dBFS RMS or
+louder within 0.5 s after it, at its first sample that loud) + the spec's `onset_lead` (default 0).
+Smoke test 2026-09-25: alignment put the words 0.10 and 0.12 s before Scribe heard them; with the
+audible onset they land 0.008 and 0.055 s before Scribe's word start, inside the clock's 0.075 s
+allowance for Scribe's own word-start jitter (`inspect.SCRIBE_EARLY`).
 CLI: `python -m workman.studio.voice tts "<text>" out.mp3 | sound "<prompt>" out.mp3 --seconds 20 | loudness <file> | onset <take.json> "<phrase>"`.
 
 ## Type system (`typesystem.py`)
@@ -99,10 +104,12 @@ CLI: `python -m workman.studio.still make <dir> <name.png> "<subject>" [-i ref.p
 
 ## Assemble (`assemble.py`)
 `<job>/spec.json` (see the module docstring for the full shape): `name`, `fps` (24/25/30),
-`size`, `end`, `renderer` (`drawtext` | `atmosmotion`), optional `formats` (`1:1`, `16:9`,
-`9:16`), `shots` (clip with `from` and `horizon`, `logo`, `card` with `mark`, `cta`, `url`,
+`size`, `end`, `renderer` (`drawtext` | `atmosmotion`), `onset_lead` (0..0.3 s, default 0),
+optional `formats` (`1:1`, `16:9`, `9:16`), `shots` (clip with `from` and `horizon`, `logo`, `card` with `mark`, `cta`, `url`,
 `facts`) each ending on an integer `end_frame`, `vo` lines (`shot`, `at`, `text`, `words`,
-`facts` or `opinion`), `bed`, `chime`.
+`facts` or `opinion`), `bed`, `chime`. The card's mark must be the family of the logo shot
+before it (`typesystem.LOGO_FAMILIES`: the green mark after a status-hold-green clip, the plain
+Ai after a dissolve clip, the plain Ai when there is no logo shot); anything else is invalid.
 
 Stages (`python -m workman.studio.assemble <job> plan|assets|render|verify|all [--format F]`):
 - `assets`: VO takes (stops at the first that fits and reads 1.5 s), bed, chime. The only
@@ -116,7 +123,12 @@ Stages (`python -m workman.studio.assemble <job> plan|assets|render|verify|all [
   -2.5 dB to -14 LUFS. Writes `out/<name>.mp4 .cmd .timing.json`, `audio/<name>_premix.wav`.
 - `verify`: probe (h264, size, fps, aac, length), 7-frame strip, onset band test (text band
   clean 0.1 s before the onset, drawn 0.4 s after, against the source frame of the shot
-  that frame shows), green frame, loudness (-14 +-0.5, TP <= -1.0), VO inside shots, spoken
+  that frame shows), the Scribe transcript as an independent clock when
+  `out/<name>.inspect/transcript.txt` exists (every phrase at most 0.1 s after its word is
+  heard, never more than 0.075 s before Scribe's word start), every planned cut seen on the render's own frames (`planned_cuts`: the luma change
+  across the cut is at least 1.8x the shot's own frame-to-frame change (the larger median of the
+  frames before and after) and at least 1.0;
+  ffmpeg scene scores of 0.14 to 0.28 missed every cut of the dark brand footage), green frame, loudness (-14 +-0.5, TP <= -1.0), VO inside shots, spoken
   text equals the script; deviations (read time under 1.5 s, card under 3 s) are listed but
   do not fail. Writes `review/<name>_verify.json`, `review/<name>_strip.jpg`,
   `review/<base>_contact.jpg`.
@@ -134,9 +146,8 @@ switch to the engine's own alpha (ProRes 4444) once it lands.
 FAIL | PENDING REVIEW`, then `| # | check | PASS/FAIL | evidence | owner of the fix |`, ending
 "Owner still hears the final cut.") and `review/<name>_qc.json`. Rows: copy rules, fact IDs,
 conflicts (WARN), untraced numbers, probe, loudness, VO in shots, VO says the script, onset
-band, green frame, readability (WARN), cuts within one frame (a planned cut the scene detector
-cannot see, such as the black logo shot into the dark card, is a WARN) and none inside a shot
-(FAIL) from `cuts.txt`, spoken words equal the script and phrases land 0 to 0.1 s after their spoken
+band, green frame, readability (WARN), planned cuts from verify's frame check (FAIL when one is
+not on the frames) and no unplanned scene cut inside a shot (`cuts.txt`, FAIL), spoken words equal the script and phrases land at most 0.1 s after (and no more than 0.075 s before) their spoken
 word (from `transcript.txt`), and four eye checks that stay PENDING until `eye` passes them.
 `copy_check(job)` runs the copy and claim rows without a render and writes nothing.
 CLI: `python -m workman.studio.qc <job> [--name N] [--copy-only] [--eye JSON]`.

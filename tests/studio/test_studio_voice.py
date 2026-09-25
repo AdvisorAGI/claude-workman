@@ -81,6 +81,19 @@ def test_audible_end_and_attack_time():
         v.attack_time([0, 0], 1000)
 
 
+def test_text_never_appears_before_the_voice_is_heard():
+    rate = 1000
+    take = [0] * 120 + [9000, -9000] * 200        # alignment says 0.0 s; the voice is heard at 0.12 s
+    heard = v.audible_onset(take, rate, 0.0)
+    assert heard == 0.12
+    assert v.text_onset(0.0, heard) == 0.12 and v.text_onset(0.0, heard, lead=0.05) == 0.17
+    assert v.text_onset(0.3, 0.2) == 0.3              # heard earlier than aligned: keep the alignment
+    assert v.audible_onset([0] * 2000, rate, 0.0) is None and v.text_onset(0.5, None) == 0.5
+    assert v.audible_onset([0] * 600 + [9000], rate, 0.0) is None   # nothing within the 0.5 s search
+    hiss = [100, -100] * 125 + [9000, -9000] * 50                  # -50 dBFS room tone is not the voice
+    assert v.audible_onset(hiss, rate, 0.0) == 0.25
+
+
 def test_loudness_gates_and_parsers():
     assert v.loudness_errors(-14.3, -1.2) == [] and len(v.loudness_errors(-13.2, -0.8)) == 2
     assert v.loudness_errors(float("nan"), -2.0)  # an unmeasured file never passes
