@@ -16,8 +16,11 @@ Run:  python -m workman.server        (stdio MCP server)
 from __future__ import annotations
 
 import importlib
+import json
+import re
 import sys
 import time
+from pathlib import Path
 
 from mcp.server.fastmcp import FastMCP, Image
 
@@ -1610,6 +1613,129 @@ def layout_arrange(spec: dict) -> dict:
     needs and let it place the windows.
     """
     return workspace_layout.arrange(spec)
+
+
+# ---- STUDIO ------------------------------------------------------------------
+# Workman Studio (workman.studio, docs/STUDIO.md): the 2026-09-25 ad-video method
+# as tools for the studio-* crew. Imported per call so a missing optional piece
+# (Pillow, ffmpeg, the Atmosmotion engine) only affects the tool that needs it.
+# Renders run detached with their PID in the job's ledger; every tool answers
+# with a dict and never raises.
+
+_STUDIO_TEXT_MAX = 4000     # transcript characters returned inline; the file has all of it
+
+
+def _studio(fn, *args, **kwargs) -> dict:
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+@mcp.tool()
+def studio_new_job(slug: str, title: str = "") -> dict:
+    """Open a studio job at ~/studio-jobs/<YYYYMMDD>-<slug>/ with the crew's documents
+    (JOB, STATE, BRIEF, SCRIPT, CLIPS, SOUND, QC) and clips/ stills/ audio/ ident/ out/ review/.
+    Never overwrites a file that exists; returns the folder."""
+    from .studio import job
+    return _studio(job.new_job, slug, None, title)
+
+
+@mcp.tool()
+def studio_status(job: str) -> dict:
+    """Where a job stands: which documents are written, clips, renders, the QC RESULT line, the
+    background render (running or finished, log tail), the PIDs it started, and the board heat."""
+    from .studio import job as studio_job
+    return _studio(studio_job.status, job)
+
+
+@mcp.tool()
+def studio_inspect(path: str, outdir: str = "", transcribe: bool = True) -> dict:
+    """Break a video open: probe.json, frames.jpg (4 fps sheet), cuts.txt, loudness.txt, audio.png
+    (waveform + spectrogram) and transcript.txt (ElevenLabs Scribe word timings). Heat-gated,
+    nice 19, 4 threads. Read all of them; measurements are not listening."""
+    from .studio import inspect as studio_inspect_mod
+
+    def run() -> dict:
+        r = studio_inspect_mod.inspect(path, outdir or None, transcribe=transcribe)
+        r["transcript"] = r.get("transcript", "")[:_STUDIO_TEXT_MAX]
+        return r
+    return _studio(run)
+
+
+@mcp.tool()
+def studio_voice(job: str, action: str = "assets", spec: str = "spec.json", text: str = "", name: str = "",
+                 phrase: str = "", prompt: str = "", seconds: float = 0.0) -> dict:
+    """Voice and sound for a job (ElevenLabs is the only network call; Brian, with-timestamps).
+    action: assets (VO takes that fit their shots + bed + chime for spec.json) | tts (one line
+    `text` to audio/<name>.mp3 + .json) | sound (`prompt`, `seconds` to audio/<name>.mp3) |
+    onset (`phrase` in audio/<name>.json) | loudness (audio/<name> or a path). A take that
+    overruns its shot gets a shorter written pause, never faster audio."""
+    from .studio import assemble, voice
+    from .studio import job as studio_job
+
+    def run() -> dict:
+        d = studio_job.resolve_job(job)
+        if action == "assets":
+            return assemble.assets(d, spec)
+        if action == "loudness":
+            p = Path(name).expanduser() if name.startswith(("/", "~")) else d / "audio" / name
+            i, tp = voice.ebur128(["-i", str(p), "-vn"])
+            return {"ok": True, "path": str(p), "integrated_lufs": i, "true_peak_dbtp": tp,
+                    "errors": voice.loudness_errors(i, tp)}
+        if not re.fullmatch(r"[A-Za-z0-9._-]{1,80}", name or ""):
+            return {"ok": False, "error": "name must be a plain file stem like vo-hook-1"}
+        stem = d / "audio" / re.sub(r"\.(mp3|json)$", "", name)
+        stem.parent.mkdir(parents=True, exist_ok=True)
+        if action == "tts":
+            meta = voice.tts(text, stem.with_suffix(".mp3"), stem.with_suffix(".json"))
+            return {"ok": True, "mp3": str(stem.with_suffix(".mp3")), "spoken": voice.spoken(meta["text"]),
+                    "span": voice.speech_span(meta["alignment"])}
+        if action == "sound":
+            return {"ok": True, **voice.sound(stem.with_suffix(".mp3"), prompt, seconds)}
+        if action == "onset":
+            al = json.loads(stem.with_suffix(".json").read_text())["alignment"]
+            return {"ok": True, "phrase": phrase, "onset": voice.phrase_onset(al, phrase),
+                    "span": voice.speech_span(al)}
+        return {"ok": False, "error": f"unknown action {action!r}",
+                "actions": ["assets", "tts", "sound", "onset", "loudness"]}
+    return _studio(run)
+
+
+@mcp.tool()
+def studio_assemble(job: str, spec: str = "spec.json", stage: str = "all", format: str = "") -> dict:
+    """Build the ad from spec.json. stage: plan (timing and word lines, inline, renders nothing) |
+    render | verify | all. render/verify/all start one detached process (heat gate, one render at
+    a time, never overwrites an earlier v<n>) and return its PID and log; poll studio_status.
+    format: '' for the spec's size and each of its formats, or one of 9:16 16:9 1:1."""
+    from .studio import assemble
+
+    if stage == "plan":
+        return _studio(assemble.plan, job, spec)
+    return _studio(assemble.start_background, job, spec, stage, format)
+
+
+@mcp.tool()
+def studio_qc(job: str, name: str = "", spec: str = "spec.json", eye: dict | None = None,
+              copy_only: bool = False, transcribe: bool = True) -> dict:
+    """Machine checks of a render into QC.md (first line RESULT: PASS | FAIL | PENDING REVIEW):
+    copy rules, fact IDs against FACTS.md, probe, loudness, onsets, cuts, spoken words. Runs
+    studio_inspect first when the render has not been broken open. The eye checks (no women,
+    one bed, voice, brand look) stay PENDING until `eye` passes them in, e.g.
+    {"women": {"pass": true, "evidence": "frames.jpg tiles 1-64"}}. copy_only checks the
+    spec's copy and claims without a render and writes nothing."""
+    from .studio import assemble, inspect as studio_inspect_mod, qc
+
+    def run() -> dict:
+        if copy_only:
+            return qc.copy_check(job, spec)
+        d, s = assemble.load(job, spec)
+        render = name or s["name"]
+        insp = d / "out" / f"{render}.inspect"
+        if not (insp / "frames.jpg").is_file():
+            studio_inspect_mod.inspect(d / "out" / f"{render}.mp4", insp, transcribe=transcribe)
+        return qc.qc(d, render, spec, eye)
+    return _studio(run)
 
 
 def main() -> None:
