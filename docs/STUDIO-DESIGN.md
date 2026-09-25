@@ -59,3 +59,14 @@ Helios), native American delivery; no em dashes, no model names, no stats withou
 brand look (matte black, off-white, one emerald accent); ffmpeg nice 19 <= 4 threads, heat 86/80
 gate, one gen model at a time; kill by PID only; nothing published or spent without the owner;
 grok downloads only through grok's own Download button (never cookie reads).
+
+## Canonical Atmosmotion engine (verified 2026-09-25 20:40Z, full checkout survey)
+/home/monzurul/Documents/Codex/2026-09-23/continue-the-owner-s-motion-reference/work/atmosmotion-branding,
+branch feat/atmosmotion-self-branding-20260923 @ 6b8aa17 plus its 8 uncommitted files (fluidMotion image
+layer, audio-track mux). Nothing newer exists on GitHub (advisorppc-org/atmosmotion) or in any Codex thread.
+Not merged into it: studio/templates-20260921 (ad templates). Build: `pnpm install --frozen-lockfile=false
+&& pnpm -r build` (Node 22, pnpm 9). Text: Geist and Fraunces load via native-typography; presets with
+word/grapheme stagger in engine-native text-anim.ts. GAP: encoder is yuv420p MP4 only, no alpha output
+(ProRes 4444 / VP9 alpha / rgba PNG sequence declared but not wired). Transparent type therefore = render
+white-on-black plate and alphamerge in ffmpeg until the encoder gap is closed (a Studio follow-up ticket).
+Type spec binding on every render: ~/advisorppc-ads-20260925/TYPE-SYSTEM.md.
