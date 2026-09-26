@@ -46,10 +46,10 @@ def roots() -> list[Path]:
     """Every root, de-duplicated, default first."""
     seen: set[str] = set()
     out: list[Path] = []
-    library = Path.home() / "advisorppc-agent-skills" / "library"
+    library = Path(os.environ.get("WORKMAN_SKILL_LIBRARY") or Path.home() / ".workman" / "library")
     defaults = [Path.home() / ".claude" / "skills"]
     if library.is_dir():
-        defaults.append(library)  # the private fleet library, when cloned to $HOME
+        defaults.append(library)  # a shared skill library, when one is linked there
     for r in [*defaults, *env_roots()]:
         key = os.path.normpath(str(r))
         if key not in seen:

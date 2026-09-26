@@ -226,7 +226,12 @@ class TestServerTools:
 def test_roots_include_home_library_when_present(tmp_path, monkeypatch):
     monkeypatch.setenv("HOME", str(tmp_path))
     monkeypatch.delenv("WORKMAN_SKILL_ROOTS", raising=False)
+    monkeypatch.delenv("WORKMAN_SKILL_LIBRARY", raising=False)
     assert skills_index.roots() == [tmp_path / ".claude" / "skills"]
-    lib = tmp_path / "advisorppc-agent-skills" / "library"
+    lib = tmp_path / ".workman" / "library"
     lib.mkdir(parents=True)
     assert skills_index.roots() == [tmp_path / ".claude" / "skills", lib]
+    other = tmp_path / "elsewhere"
+    other.mkdir()
+    monkeypatch.setenv("WORKMAN_SKILL_LIBRARY", str(other))
+    assert skills_index.roots() == [tmp_path / ".claude" / "skills", other]
