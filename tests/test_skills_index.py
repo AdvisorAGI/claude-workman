@@ -221,3 +221,12 @@ class TestServerTools:
         assert server.skill_show("demo-a", section="one")["body"].startswith("## One")
         assert server.skill_reindex()["count"] == 1
         assert server.skill_add("/nonexistent/dir")["ok"] is False
+
+
+def test_roots_include_home_library_when_present(tmp_path, monkeypatch):
+    monkeypatch.setenv("HOME", str(tmp_path))
+    monkeypatch.delenv("WORKMAN_SKILL_ROOTS", raising=False)
+    assert skills_index.roots() == [tmp_path / ".claude" / "skills"]
+    lib = tmp_path / "advisorppc-agent-skills" / "library"
+    lib.mkdir(parents=True)
+    assert skills_index.roots() == [tmp_path / ".claude" / "skills", lib]

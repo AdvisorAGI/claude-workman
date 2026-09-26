@@ -46,7 +46,11 @@ def roots() -> list[Path]:
     """Every root, de-duplicated, default first."""
     seen: set[str] = set()
     out: list[Path] = []
-    for r in [Path.home() / ".claude" / "skills", *env_roots()]:
+    library = Path.home() / "advisorppc-agent-skills" / "library"
+    defaults = [Path.home() / ".claude" / "skills"]
+    if library.is_dir():
+        defaults.append(library)  # the private fleet library, when cloned to $HOME
+    for r in [*defaults, *env_roots()]:
         key = os.path.normpath(str(r))
         if key not in seen:
             seen.add(key)
