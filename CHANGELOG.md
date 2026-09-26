@@ -4,6 +4,17 @@ All notable changes to claude-workman.
 
 ## [Unreleased]
 
+### Added — Workman Desk (composer + CLI seats)
+
+- **`workman-desk`** / `python -m workman.desk` — a localhost app (macOS, Linux,
+  Windows) with chats and a Monday-style board. Agent picker: Workman, Grok,
+  Claude, Codex, Cursor. Send runs the **logged-in CLI**, not an API key.
+  Loopback only. The server detaches so the Chrome window does not go dead when
+  the launching terminal exits. Chats keep a transcript (Grok also uses
+  `--session-id` / `--resume`). The board has Backlog / Working / Blocked / Done;
+  each item can be assigned to an agent and **Run** starts that agent on the
+  brief.
+
 ### Added — workman-mode 1/4 agent strip
 
 - **`layout_agent`** — park the session app (the terminal or chat running the

@@ -1,0 +1,297 @@
+{
+  "_reference": {
+    "source": "MEASURED from Apple's official iOS 27 UI Kit (Figma community file 1651309003795292092, kit 27.0.2) via Figma REST API on 2026-07-29",
+    "kitVersion": "27.0.2",
+    "measured": "2026-07-29",
+    "figmaFileKey": "1he05dQDLN4F7TH3bAB3uk",
+    "figmaPage": "Text Styles and Dynamic Type (node 0:2194)",
+    "supersedes": "Figma iOS & iPadOS 26 Community Kit (pDmGXdYu2k8xlf1SQoU9PW), extracted 2026-03-27",
+    "plan": "../PLAN.md",
+    "inventory": "../../figma-ios27-pages.md",
+    "note": "fontSize / lineHeight / letterSpacing / weight below are read from the kit's own TEXT layers and shared text styles. Apple's kit file, fonts, and artwork are not redistributed — only the numbers are recorded.",
+    "_notMeasured": "looseLineHeight is NOT present anywhere on the kit's typography page; those values are carried over unchanged from the iOS 26 extraction and remain unverified against the iOS 27 kit."
+  },
+  "fontFamily": "SF Pro",
+  "fallback": "-apple-system, system-ui, sans-serif",
+  "styles": {
+    "largeTitle": {
+      "fontSize": 34,
+      "lineHeight": 41,
+      "letterSpacing": 0.4,
+      "regular": "Regular",
+      "emphasized": "Bold",
+      "looseLineHeight": 43
+    },
+    "title1": {
+      "fontSize": 28,
+      "lineHeight": 34,
+      "letterSpacing": 0.38,
+      "regular": "Regular",
+      "emphasized": "Bold",
+      "looseLineHeight": 36
+    },
+    "title2": {
+      "fontSize": 22,
+      "lineHeight": 28,
+      "letterSpacing": -0.26,
+      "regular": "Regular",
+      "emphasized": "Bold",
+      "looseLineHeight": 30
+    },
+    "title3": {
+      "fontSize": 20,
+      "lineHeight": 25,
+      "letterSpacing": -0.45,
+      "regular": "Regular",
+      "emphasized": "Semibold",
+      "looseLineHeight": 27
+    },
+    "headline": {
+      "fontSize": 17,
+      "lineHeight": 22,
+      "letterSpacing": -0.43,
+      "regular": "Semibold",
+      "italic": "Semibold Italic",
+      "looseLineHeight": 24
+    },
+    "body": {
+      "fontSize": 17,
+      "lineHeight": 22,
+      "letterSpacing": -0.43,
+      "regular": "Regular",
+      "emphasized": "Semibold",
+      "italic": "Regular Italic",
+      "emphasizedItalic": "Semibold Italic",
+      "looseLineHeight": 24
+    },
+    "callout": {
+      "fontSize": 16,
+      "lineHeight": 21,
+      "letterSpacing": -0.31,
+      "regular": "Regular",
+      "emphasized": "Semibold",
+      "italic": "Regular Italic",
+      "emphasizedItalic": "Semibold Italic",
+      "looseLineHeight": 23,
+      "_kitDefect": "The kit's Callout/Emphasized resolves to the italic face. The runtime emphasized face is .SFUI-Semibold (upright), so this is a kit authoring slip and was not propagated."
+    },
+    "subheadline": {
+      "fontSize": 15,
+      "lineHeight": 20,
+      "letterSpacing": -0.23,
+      "regular": "Regular",
+      "emphasized": "Semibold",
+      "italic": "Regular Italic",
+      "emphasizedItalic": "Semibold Italic"
+    },
+    "footnote": {
+      "fontSize": 13,
+      "lineHeight": 18,
+      "letterSpacing": -0.08,
+      "regular": "Regular",
+      "emphasized": "Semibold",
+      "italic": "Regular Italic",
+      "emphasizedItalic": "Semibold Italic"
+    },
+    "caption1": {
+      "fontSize": 12,
+      "lineHeight": 16,
+      "letterSpacing": 0,
+      "regular": "Regular",
+      "emphasized": "Semibold",
+      "italic": "Regular Italic",
+      "emphasizedItalic": "Semibold Italic",
+      "_measuredChange": "Emphasized weight is Semibold, not Medium. Confirmed twice: all four kit specimen groups, and the runtime emphasized face resolves to .SFUI-Semibold."
+    },
+    "caption2": {
+      "fontSize": 11,
+      "lineHeight": 13,
+      "letterSpacing": 0.06,
+      "regular": "Regular",
+      "emphasized": "Semibold",
+      "italic": "Regular Italic",
+      "emphasizedItalic": "Semibold Italic"
+    }
+  },
+  "dynamicType": {
+    "_source": "MEASURED point sizes, read one specimen layer at a time from the kit's 'Dynamic Type' and 'Dynamic Type – Accessibility Sizes' sections (kit 27.0.2). The kit also carries a line height for every cell; only point sizes are recorded here to keep this map's existing shape.",
+    "xSmall": {
+      "caption2": 11,
+      "caption1": 11,
+      "footnote": 12,
+      "subheadline": 12,
+      "callout": 13,
+      "body": 14,
+      "headline": 14,
+      "title3": 17,
+      "title2": 19,
+      "title1": 25,
+      "largeTitle": 31
+    },
+    "small": {
+      "caption2": 11,
+      "caption1": 11,
+      "footnote": 12,
+      "subheadline": 13,
+      "callout": 14,
+      "body": 15,
+      "headline": 15,
+      "title3": 18,
+      "title2": 20,
+      "title1": 26,
+      "largeTitle": 32
+    },
+    "medium": {
+      "caption2": 11,
+      "caption1": 11,
+      "footnote": 12,
+      "subheadline": 14,
+      "callout": 15,
+      "body": 16,
+      "headline": 16,
+      "title3": 19,
+      "title2": 21,
+      "title1": 27,
+      "largeTitle": 33
+    },
+    "large": {
+      "caption2": 11,
+      "caption1": 12,
+      "footnote": 13,
+      "subheadline": 15,
+      "callout": 16,
+      "body": 17,
+      "headline": 17,
+      "title3": 20,
+      "title2": 22,
+      "title1": 28,
+      "largeTitle": 34
+    },
+    "xLarge": {
+      "caption2": 13,
+      "caption1": 14,
+      "footnote": 15,
+      "subheadline": 17,
+      "callout": 18,
+      "body": 19,
+      "headline": 19,
+      "title3": 22,
+      "title2": 24,
+      "title1": 30,
+      "largeTitle": 36
+    },
+    "xxLarge": {
+      "caption2": 15,
+      "caption1": 16,
+      "footnote": 17,
+      "subheadline": 19,
+      "callout": 20,
+      "body": 21,
+      "headline": 21,
+      "title3": 24,
+      "title2": 26,
+      "title1": 32,
+      "largeTitle": 38
+    },
+    "xxxLarge": {
+      "caption2": 17,
+      "caption1": 18,
+      "footnote": 19,
+      "subheadline": 21,
+      "callout": 22,
+      "body": 23,
+      "headline": 23,
+      "title3": 26,
+      "title2": 28,
+      "title1": 34,
+      "largeTitle": 40
+    },
+    "_dynamicTypeNote": "ax1..ax5 are the five accessibility content-size categories (accessibilityMedium/Large/ExtraLarge/ExtraExtraLarge/ExtraExtraExtraLarge). The iOS 26 extraction omitted the four title styles here because no published flat table covered them; kit 27.0.2 draws all eleven styles at every AX size, so the title rows below are now measured rather than omitted. Two of those measured cells are self-inconsistent inside the kit — see _axTitleAnomalies. Where exactness matters on Apple platforms, still resolve at runtime via UIFont.preferredFont(forTextStyle:) under the relevant .accessibility* trait.",
+    "_axTitleAnomalies": "Resolved by runtime measurement. The kit's ax4.title3 (43) duplicated ax3.title3 and sat below ax4.body, inverting the hierarchy; the runtime gives 49, which restores the 6pt step across 31/37/43/49/55 and keeps title3 above body. The kit's ax2.title2 (43) duplicated ax2.title1; both Apple's HIG table and the runtime give 39. Both kit cells were defects, not spec.",
+    "ax1": {
+      "caption2": 20,
+      "caption1": 22,
+      "footnote": 23,
+      "subheadline": 25,
+      "callout": 26,
+      "body": 28,
+      "headline": 28,
+      "title3": 31,
+      "title2": 34,
+      "title1": 38,
+      "largeTitle": 44
+    },
+    "ax2": {
+      "caption2": 24,
+      "caption1": 26,
+      "footnote": 27,
+      "subheadline": 30,
+      "callout": 32,
+      "body": 33,
+      "headline": 33,
+      "title3": 37,
+      "title2": 39,
+      "title1": 43,
+      "largeTitle": 48
+    },
+    "ax3": {
+      "caption2": 29,
+      "caption1": 32,
+      "footnote": 33,
+      "subheadline": 36,
+      "callout": 38,
+      "body": 40,
+      "headline": 40,
+      "title3": 43,
+      "title2": 44,
+      "title1": 48,
+      "largeTitle": 52
+    },
+    "ax4": {
+      "caption2": 34,
+      "caption1": 37,
+      "footnote": 38,
+      "subheadline": 42,
+      "callout": 44,
+      "body": 47,
+      "headline": 47,
+      "title3": 49,
+      "title2": 50,
+      "title1": 53,
+      "largeTitle": 56
+    },
+    "ax5": {
+      "caption2": 40,
+      "caption1": 43,
+      "footnote": 44,
+      "subheadline": 49,
+      "callout": 51,
+      "body": 53,
+      "headline": 53,
+      "title3": 55,
+      "title2": 56,
+      "title1": 58,
+      "largeTitle": 60
+    },
+    "_hig": {
+      "_source": "Apple Human Interface Guidelines — Typography, iOS/iPadOS larger accessibility type sizes",
+      "_checked": "2026-07-30",
+      "_confirmed": "Title styles DO scale through the full accessibility range; Apple publishes their sizes for AX1, AX2, AX3, and AX5.",
+      "_ax4Gap": "AX4 title rows are absent from the public HIG table. Values here for ax4 titles come from the kit and are unverified."
+    },
+    "_runtimeVerified": "MEASURED at runtime on an iOS 26.5 simulator via UIKit on 2026-07-30 (UIFont.preferredFont(forTextStyle:compatibleWith:) and UIColor.resolvedColor(with:)). Recorded for iOS 27 because base metrics and system colours measured identical between the iOS 26 and 27 kits; re-measure when an iOS 27 runtime is installed."
+  },
+  "weights": {
+    "ultraLight": 100,
+    "thin": 200,
+    "light": 300,
+    "regular": 400,
+    "medium": 500,
+    "semibold": 600,
+    "bold": 700,
+    "heavy": 800,
+    "black": 900
+  },
+  "_measuredWeights": "The scale above is the nominal CSS ladder and is unchanged. For reference, the weight axis the kit itself reports on its specimen layers is Regular 400, Semibold 590, Bold 700 — SF Pro is a variable font and its Semibold sits at 590, not the round 600 the ladder uses. 600 stays here because it is what the CSS build emits and what non-variable fallbacks snap to anyway.",
+  "_opticalSize": "SF Pro is an optical font: it uses the Text optical size below 20pt and the Display optical size at 20pt and above (title3 and up). The system swaps automatically; on web, the single 'SF Pro' family with font-optical-sizing:auto handles both. The 20pt crossover is approximate, not an Apple-published hard constant."
+}

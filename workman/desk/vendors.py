@@ -135,6 +135,30 @@ _catalog_cache: tuple[float, list[Seat]] | None = None
 _CATALOG_TTL = 30.0
 
 
+WORKMAN_PREAMBLE = (
+    "You are Workman, a desktop agent on this machine. Drive the screen with "
+    "Workman/computer tools (screenshot, click, type, layout). Do the job.\n\n"
+)
+
+_WORKMAN_VENDOR = Vendor(
+    "workman", "Workman", ("workman",),
+    ("grok-4.6",), "grok-4.6",
+)
+
+
+def _binary_kind(binary: str) -> str:
+    name = Path(binary).name.lower()
+    if name.startswith("grok"):
+        return "grok"
+    if name.startswith("claude"):
+        return "claude"
+    if name.startswith("codex"):
+        return "codex"
+    if "cursor" in name or name == "agent":
+        return "cursor"
+    return "grok"
+
+
 def catalog(*, refresh: bool = False) -> list[Seat]:
     import time
     global _catalog_cache
@@ -151,6 +175,11 @@ def catalog(*, refresh: bool = False) -> list[Seat]:
         if not binary:
             continue
         seats.append(Seat(vendor, binary, models_for(vendor, binary)))
+    if seats:
+        prefer = next((s for s in seats if s.vendor.id == "grok"), seats[0])
+        seats.insert(0, Seat(
+            _WORKMAN_VENDOR, prefer.binary, list(prefer.models),
+        ))
     _catalog_cache = (now, seats)
     return seats
 
@@ -163,17 +192,28 @@ def build_argv(
     *,
     prompt_file: str | None = None,
     auto_approve: bool = False,
+    session_id: str | None = None,
+    resume: bool = False,
 ) -> list[str]:
     """Argv only. Callers pass this to subprocess — never to a shell."""
     vid = (vendor_id or "").strip().lower()
+    if vid == "workman":
+        vid = _binary_kind(binary)
+        if not (prompt or "").startswith("You are Workman"):
+            prompt = WORKMAN_PREAMBLE + (prompt or "")
     model = (model or "").strip()
     prompt = prompt or ""
+    sid = (session_id or "").strip() or None
     if vid == "grok":
         cmd = [binary, "--no-auto-update", "--no-alt-screen"]
         if model:
             cmd.extend(["-m", model])
         if auto_approve:
             cmd.append("--always-approve")
+        if resume and sid:
+            cmd.extend(["-r", sid])
+        elif sid:
+            cmd.extend(["-s", sid])
         if prompt_file:
             cmd.extend(["--prompt-file", prompt_file])
         else:
@@ -183,6 +223,10 @@ def build_argv(
         cmd = [binary, "--output-format", "text"]
         if model:
             cmd.extend(["--model", model])
+        if resume and sid:
+            cmd.extend(["--resume", sid])
+        elif resume:
+            cmd.append("--continue")
         cmd.extend(["-p", prompt])
         return cmd
     if vid == "codex":
@@ -199,6 +243,10 @@ def build_argv(
             cmd.extend(["--model", model])
         if auto_approve:
             cmd.append("--force")
+        if resume and sid:
+            cmd.extend(["--resume", sid])
+        elif resume:
+            cmd.append("--continue")
         cmd.append(prompt)
         return cmd
     raise ValueError(f"unknown vendor {vendor_id!r}")

@@ -1,0 +1,155 @@
+/* Apple Design Resources — CSS tokens for Workman Desk.
+   Colors: live AppKit on macOS 26.6.2 (25G83), same accent hex as
+   iOS/macOS 27 UI Kit 27.0.2. Type: macOS HIG control sizes (not iOS 17pt body).
+   Materials: kit-measured Liquid Glass Regular (Figma 27.0.2). */
+
+:root {
+  --apple-font: -apple-system, BlinkMacSystemFont, "SF Pro Text", "SF Pro Display", system-ui, sans-serif;
+  --apple-mono: ui-monospace, "SF Mono", SFMono-Regular, Menlo, monospace;
+
+  --apple-size-mini: 9px;
+  --apple-size-small: 11px;
+  --apple-size-regular: 13px;
+  --apple-size-large: 15px;
+  --apple-size-xlarge: 24px;
+
+  --apple-title1: 22px;
+  --apple-title2: 17px;
+  --apple-title3: 15px;
+  --apple-headline: 13px;
+  --apple-body: 13px;
+  --apple-callout: 12px;
+  --apple-subheadline: 11px;
+  --apple-footnote: 10px;
+  --apple-caption: 10px;
+
+  --apple-weight-regular: 400;
+  --apple-weight-medium: 500;
+  --apple-weight-semibold: 600;
+  --apple-weight-bold: 700;
+
+  --apple-space-1: 4px;
+  --apple-space-2: 8px;
+  --apple-space-3: 12px;
+  --apple-space-4: 16px;
+  --apple-space-5: 20px;
+  --apple-space-6: 24px;
+
+  --apple-radius-control: 6px;
+  --apple-radius-small: 8px;
+  --apple-radius-regular: 10px;
+  --apple-radius-large: 12px;
+  --apple-radius-xlarge: 16px;
+  --apple-radius-glass: 34px;
+  --apple-radius-pill: 999px;
+
+  --apple-glass-blur: 24px;
+  --apple-glass-saturate: 180%;
+  --apple-glass-radius: 34px;
+}
+
+@media (prefers-color-scheme: light) {
+  :root {
+    --apple-label: rgba(0, 0, 0, 0.8471);
+    --apple-secondary-label: rgba(0, 0, 0, 0.498);
+    --apple-tertiary-label: rgba(0, 0, 0, 0.2588);
+    --apple-quaternary-label: rgba(0, 0, 0, 0.098);
+    --apple-placeholder: rgba(0, 0, 0, 0.2471);
+    --apple-separator: rgba(0, 0, 0, 0.098);
+    --apple-window-bg: #ececec;
+    --apple-control-bg: #ffffff;
+    --apple-text-bg: #ffffff;
+    --apple-grid: #e6e6e6;
+    --apple-selected-content: #0064e1;
+    --apple-selected-text-bg: #b3d7ff;
+    --apple-link: #0068da;
+    --apple-focus: rgba(0, 103, 244, 0.498);
+    --apple-fill: rgba(0, 0, 0, 0.098);
+    --apple-fill-secondary: rgba(0, 0, 0, 0.0784);
+
+    --apple-blue: #0088ff;
+    --apple-brown: #ac7f5e;
+    --apple-cyan: #00c0e8;
+    --apple-gray: #8e8e93;
+    --apple-green: #34c759;
+    --apple-indigo: #6155f5;
+    --apple-mint: #00c8b3;
+    --apple-orange: #ff8d28;
+    --apple-pink: #ff2d55;
+    --apple-purple: #cb30e0;
+    --apple-red: #ff383c;
+    --apple-teal: #00c3d0;
+    --apple-yellow: #ffcc00;
+    --apple-accent: #007aff;
+
+    --apple-glass-bg: rgba(255, 255, 255, 0.7);
+    --apple-glass-overlay: rgba(191, 191, 191, 0.1);
+    --apple-glass-shadow: rgba(0, 0, 0, 0.25);
+
+    --bg: var(--apple-control-bg);
+    --panel: var(--apple-window-bg);
+    --ink: var(--apple-label);
+    --muted: var(--apple-secondary-label);
+    --line: var(--apple-separator);
+    --accent: var(--apple-blue);
+    --go: var(--apple-green);
+    --stop: var(--apple-red);
+  }
+}
+
+@media (prefers-color-scheme: dark) {
+  :root {
+    --apple-label: rgba(255, 255, 255, 0.8471);
+    --apple-secondary-label: rgba(255, 255, 255, 0.549);
+    --apple-tertiary-label: rgba(255, 255, 255, 0.2471);
+    --apple-quaternary-label: rgba(255, 255, 255, 0.098);
+    --apple-placeholder: rgba(255, 255, 255, 0.2471);
+    --apple-separator: rgba(255, 255, 255, 0.098);
+    --apple-window-bg: #323232;
+    --apple-control-bg: #1e1e1e;
+    --apple-text-bg: #1e1e1e;
+    --apple-grid: #1a1a1a;
+    --apple-selected-content: #0059d1;
+    --apple-selected-text-bg: #3f638b;
+    --apple-link: #419cff;
+    --apple-focus: rgba(26, 169, 255, 0.498);
+    --apple-fill: rgba(255, 255, 255, 0.098);
+    --apple-fill-secondary: rgba(255, 255, 255, 0.0784);
+
+    --apple-blue: #0091ff;
+    --apple-brown: #b78a66;
+    --apple-cyan: #3cd3fe;
+    --apple-gray: #98989d;
+    --apple-green: #30d158;
+    --apple-indigo: #6d7cff;
+    --apple-mint: #00dac3;
+    --apple-orange: #ff9230;
+    --apple-pink: #ff375f;
+    --apple-purple: #db34f2;
+    --apple-red: #ff4245;
+    --apple-teal: #00d2e0;
+    --apple-yellow: #ffd600;
+    --apple-accent: #007aff;
+
+    --apple-glass-bg: rgba(26, 26, 26, 0.7);
+    --apple-glass-overlay: rgba(26, 26, 26, 0.9);
+    --apple-glass-shadow: rgba(0, 0, 0, 0.45);
+
+    --bg: var(--apple-control-bg);
+    --panel: var(--apple-window-bg);
+    --ink: var(--apple-label);
+    --muted: var(--apple-secondary-label);
+    --line: var(--apple-separator);
+    --accent: var(--apple-blue);
+    --go: var(--apple-green);
+    --stop: var(--apple-red);
+  }
+}
+
+.apple-glass {
+  background: var(--apple-glass-bg);
+  backdrop-filter: blur(var(--apple-glass-blur)) saturate(var(--apple-glass-saturate));
+  -webkit-backdrop-filter: blur(var(--apple-glass-blur)) saturate(var(--apple-glass-saturate));
+  border-radius: var(--apple-glass-radius);
+  box-shadow: 0 8px 48px var(--apple-glass-shadow);
+}

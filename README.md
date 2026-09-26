@@ -32,6 +32,23 @@ The same checkout is both the **connector** (`python -m workman.server`) and a
 **plugin** (`.claude-plugin/` + `.mcp.json` + `bin/workman`). The Mac-only
 Workman.app daemon is a separate private plugin and is not this repo.
 
+## Workman Desk — composer for every CLI seat
+
+A small local app (browser window) with **chats** and a **Monday-style board**.
+Pick an agent (Workman, Grok, Claude, Codex, Cursor), type, Enter sends through
+the **CLI you already logged into**. It never calls a vendor HTTP API. Assign a
+board item to an agent and Run — that agent does the work.
+
+```bash
+.venv/bin/python -m workman.desk          # starts the server if needed, opens the app
+bin/workman-desk --no-open                # print the URL only
+bin/workman-desk --foreground             # keep the server in this terminal
+```
+
+Only vendors whose binary is on `PATH` (or `~/.grok/bin`, `~/.local/bin`) appear.
+Grok is started without `XAI_API_KEY` so the logged-in seat is used. The server
+stays up after the launcher exits so chat does not die with `Failed to fetch`.
+
 ---
 
 ## Why accessibility-tree clicking beats pixel clicking
