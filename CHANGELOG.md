@@ -4,6 +4,18 @@ All notable changes to claude-workman.
 
 ## [Unreleased]
 
+### Added — skill finder (load skills on demand)
+
+- **`skill_search`**, **`skill_show`**, **`skill_add`**, **`skill_reindex`** — a
+  session no longer has to load every SKILL.md up front. `skill_search` ranks
+  every skill under `~/.claude/skills` and `$WORKMAN_SKILL_ROOTS` by name,
+  headings and description and returns names and short descriptions only.
+  `skill_show` loads one skill, or one `## section` of it, and lists the skill's
+  other files. `skill_add` copies a validated skill directory into a skill root
+  and never overwrites. The index is cached at
+  `~/.cache/workman/skills-index.json` and rebuilds itself when any SKILL.md is
+  added, removed or modified.
+
 ### Added — Workman Desk (composer + CLI seats)
 
 - **`workman-desk`** / `python -m workman.desk` — a localhost app (macOS, Linux,
