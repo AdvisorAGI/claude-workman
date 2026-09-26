@@ -7,6 +7,7 @@ a false success.
 from __future__ import annotations
 
 import json
+import os
 import subprocess
 
 from workman import gtkops
@@ -20,6 +21,14 @@ class FakeCompleted:
 
 
 class TestCall:
+    def test_explicit_system_gtk_interpreter_keeps_venv_unchanged(self, monkeypatch):
+        captured = {}
+        monkeypatch.setenv("WORKMAN_GTK_PYTHON", "/usr/bin/python3")
+        monkeypatch.setattr(gtkops.subprocess, "run", lambda cmd, **k:
+                            captured.update(cmd=cmd) or FakeCompleted('{"ok":true}'))
+        assert gtkops.call("windows")["ok"]
+        assert captured["cmd"][0] == "/usr/bin/python3"
+
     def test_parses_helper_json(self, monkeypatch):
         monkeypatch.setattr(gtkops.subprocess, "run",
                             lambda *a, **k: FakeCompleted(json.dumps({"ok": True, "n": 2})))
@@ -59,7 +68,8 @@ class TestCall:
                             FakeCompleted(json.dumps({"ok": True})))
         gtkops.call("windows")
         assert captured["cmd"][1:3] == ["-m", "workman.gtkops"]
-        assert "workman" in captured["env"]["PYTHONPATH"]
+        pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(gtkops.__file__)))
+        assert pkg_parent in captured["env"]["PYTHONPATH"].split(os.pathsep)
 
 
 class TestCliDispatch:

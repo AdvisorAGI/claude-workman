@@ -47,6 +47,15 @@ class TestContractParity:
         assert info["backend"] == name
         assert "modifier_super" in info, "the model needs to know what super means"
 
+    @pytest.mark.parametrize("name,module,allowed", [
+        ("linux_x11", linux_x11, {"xtest", "xdotool"}),
+        ("darwin", darwin, {"quartz", "osascript", "cliclick"}),
+        ("win32", win32, {"sendinput"}),
+    ])
+    def test_platform_info_names_its_input_channel(self, name, module, allowed):
+        info = module.platform_info()
+        assert info["input_channel"] in allowed
+
     def test_facade_exposes_the_whole_contract(self):
         missing = [fn for fn in base.CONTRACT
                    if not callable(getattr(desktop, fn, None))]

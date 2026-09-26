@@ -1,0 +1,29 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+  <!-- Workman owner pause on macOS: physical Escape pauses agent input and
+       releases what agents hold; presence makes agents yield. Listen-only
+       CGEventTap (kCGEventTapOptionListenOnly), so nothing is consumed.
+       The process needs Accessibility: System Settings > Privacy & Security >
+       Accessibility > add /Users/tariqul/workman/.venv/bin/python (or run it
+       from Workman.app, which already holds the grant). -->
+  <key>Label</key><string>ai.atmosphere.workman-esc-pause</string>
+  <key>ProgramArguments</key>
+  <array>
+    <string>/Users/tariqul/workman/.venv/bin/python</string>
+    <string>-m</string>
+    <string>workman.esc_pause</string>
+  </array>
+  <key>WorkingDirectory</key><string>/Users/tariqul/workman</string>
+  <key>EnvironmentVariables</key>
+  <dict>
+    <key>WORKMAN_LEARN_ROOT</key><string>/Users/tariqul/.grok/workman-learn</string>
+  </dict>
+  <key>RunAtLoad</key><true/>
+  <key>KeepAlive</key><true/>
+  <key>ThrottleInterval</key><integer>5</integer>
+  <key>StandardOutPath</key><string>/Users/tariqul/Library/Logs/workman-esc-pause.log</string>
+  <key>StandardErrorPath</key><string>/Users/tariqul/Library/Logs/workman-esc-pause.log</string>
+</dict>
+</plist>

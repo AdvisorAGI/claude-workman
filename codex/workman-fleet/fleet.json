@@ -1,0 +1,32 @@
+{
+  "dgx": {
+    "backend": "x11",
+    "python": "/home/monzurul/workman/.venv/bin/python",
+    "source": "/home/monzurul/workman",
+    "home": "/home/monzurul",
+    "display": ":0",
+    "xauthority": "/run/user/1000/gdm/Xauthority",
+    "gtk_python": "/usr/bin/python3"
+  },
+  "mini": {
+    "backend": "app",
+    "ssh": "tariqul@100.64.0.5",
+    "python": "/Users/tariqul/src/claude-atmos-workman/computer-mcp/.venv/bin/python",
+    "source": "/Users/tariqul/src/claude-atmos-workman/computer-mcp",
+    "home": "/Users/tariqul"
+  },
+  "air": {
+    "backend": "app",
+    "ssh": "muhammadtariqul@100.64.0.8",
+    "python": "/Users/muhammadtariqul/.claude/plugins/cache/atmosphere-ai/workman/0.3.0/computer-mcp/.venv/bin/python",
+    "source": "/Users/muhammadtariqul/.claude/plugins/cache/atmosphere-ai/workman/0.3.0/computer-mcp",
+    "home": "/Users/muhammadtariqul"
+  },
+  "machome": {
+    "backend": "app",
+    "ssh": "amg@100.64.0.7",
+    "python": "/Users/amg/src/claude-atmos-workman/computer-mcp/.venv/bin/python",
+    "source": "/Users/amg/src/claude-atmos-workman/computer-mcp",
+    "home": "/Users/amg"
+  }
+}

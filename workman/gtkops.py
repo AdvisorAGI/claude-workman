@@ -46,7 +46,8 @@ def call(op: str, **kwargs) -> dict:
     )
     try:
         proc = subprocess.run(
-            [sys.executable, "-m", _MODULE, op, json.dumps(kwargs)],
+            [os.environ.get("WORKMAN_GTK_PYTHON") or sys.executable,
+             "-m", _MODULE, op, json.dumps(kwargs)],
             env=env, capture_output=True, text=True, timeout=_TIMEOUT,
         )
     except subprocess.TimeoutExpired:

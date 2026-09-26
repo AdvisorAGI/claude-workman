@@ -50,6 +50,23 @@ def _launch_allowed() -> bool:
     )
 
 
+#: A browser started with any of these is not the owner's browser, and a page
+#: can tell: an open debug port answers probes, --enable-automation sets
+#: navigator.webdriver, a scratch profile has no history and no logins. The
+#: launcher refuses them; a person opens the normal launcher and the
+#: logged-in Default profile.
+AUTOMATION_FLAGS = (
+    "--remote-debugging-port", "--remote-debugging-pipe", "--remote-allow-origins",
+    "--enable-automation", "--headless", "--user-data-dir", "--load-extension",
+    "--disable-blink-features", "--test-type", "--enable-logging=stderr",
+)
+
+
+def automation_flags(argv: list[str]) -> list[str]:
+    """The arguments in argv that would mark a browser as automated."""
+    return [a for a in argv[1:] if any(a == f or a.startswith(f + "=") for f in AUTOMATION_FLAGS)]
+
+
 def launch(command: str, args: list[str] | None = None, wait_for_window: float = 0.0) -> dict:
     """Start a program detached from the server.
 
@@ -64,6 +81,11 @@ def launch(command: str, args: list[str] | None = None, wait_for_window: float =
     argv = shlex.split(command) if args is None else [command, *args]
     if not argv:
         return {"ok": False, "error": "no command given"}
+    flagged = automation_flags(argv)
+    if flagged and os.environ.get("WORKMAN_ALLOW_AUTOMATION_FLAGS") != "1":
+        return {"ok": False, "error": "automation_flags_refused", "flags": flagged,
+                "hint": "launch the browser the way the owner does: no debug port, no "
+                        "automation switch, no headless, the normal Default profile"}
     if shutil.which(argv[0]) is None:
         # macOS and Windows install most software as a bundle or a Start Menu
         # entry rather than something on PATH, so "not on PATH" is not the same
@@ -90,15 +112,39 @@ def launch(command: str, args: list[str] | None = None, wait_for_window: float =
     result = {"ok": True, "pid": proc.pid, "argv": argv}
     if wait_for_window > 0:
         deadline = time.monotonic() + wait_for_window
+        last_new: list[dict] = []
         while time.monotonic() < deadline:
             new = [w for w in desktop.list_windows() if w["id"] not in before]
-            if new:
-                result["window"] = new[0]
+            last_new = new
+            ready = [w for w in new if _window_ready(w)]
+            if ready:
+                result["window"] = max(
+                    ready, key=lambda w: _window_area(w))
                 return result
             time.sleep(0.3)
-        result["window"] = None
+        result["window"] = last_new[0] if last_new else None
         result["note"] = f"no new window within {wait_for_window}s — it may still be starting"
     return result
+
+
+#: GTK maps a 1x1 client-leader at (0,0) before the real dialog is viewable.
+_MIN_MAPPED_SIDE = 20
+
+
+def _window_area(win: dict) -> int:
+    try:
+        return max(0, int(win.get("w") or 0)) * max(0, int(win.get("h") or 0))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _window_ready(win: dict) -> bool:
+    """True when a newly mapped window is large enough to type into."""
+    try:
+        w, h = int(win.get("w") or 0), int(win.get("h") or 0)
+    except (TypeError, ValueError):
+        return False
+    return w >= _MIN_MAPPED_SIDE and h >= _MIN_MAPPED_SIDE
 
 
 def list_apps() -> list[dict]:
@@ -137,6 +183,8 @@ def _command_for(pid: str) -> str:
 def _bundle_argv(argv: list[str]) -> list[str] | None:
     """Turn an app *name* into a launchable argv on macOS and Windows."""
     if IS_MAC:
+        if not _mac_app_installed(argv[0]):
+            return None
         return ["open", "-a", argv[0]] + (["--args", *argv[1:]] if len(argv) > 1 else [])
     if IS_WINDOWS:
         match = next((a for a in list_launchable(argv[0], limit=1)), None)
@@ -199,24 +247,70 @@ def _parse_desktop(path: str) -> dict:
     return fields
 
 
+def _iter_mac_bundles():
+    """Yield (bundle name without .app, path) for visible .app bundles.
+
+    Scans each MAC_APP_DIRS entry and one nested level (Utilities, Chrome Apps).
+    Dot-prefixed bundles are helper apps, not something to launch.
+    """
+    for directory in MAC_APP_DIRS:
+        if not os.path.isdir(directory):
+            continue
+        try:
+            entries = sorted(os.listdir(directory))
+        except OSError:
+            continue
+        for entry in entries:
+            path = os.path.join(directory, entry)
+            if entry.endswith(".app"):
+                if not entry.startswith(".") and os.path.isdir(path):
+                    yield entry[:-4], path
+                continue
+            if entry.startswith(".") or not os.path.isdir(path):
+                continue
+            try:
+                inner = sorted(os.listdir(path))
+            except OSError:
+                continue
+            for child in inner:
+                child_path = os.path.join(path, child)
+                if child.endswith(".app") and not child.startswith(".") and os.path.isdir(child_path):
+                    yield child[:-4], child_path
+
+
+def _mac_app_installed(name: str) -> bool:
+    """True when `name` is an installed .app (bare name, .app suffix, or path)."""
+    raw = (name or "").strip()
+    if not raw:
+        return False
+    stripped = raw.rstrip("/\\")
+    base = os.path.basename(stripped)
+    if base.endswith(".app"):
+        stem = base[:-4]
+        if stem.startswith("."):
+            return False
+        if os.path.isdir(stripped):
+            return True
+        want = stem
+    else:
+        if raw.startswith("."):
+            return False
+        want = raw
+    want_l = want.lower()
+    return any(n.lower() == want_l for n, _p in _iter_mac_bundles())
+
+
 def _list_mac_apps(query: str = "", limit: int = 60) -> list[dict]:
     """Installed .app bundles. `exec` is the bundle name because that is what
     `open -a` wants, not the binary inside Contents/MacOS."""
     needle = query.lower().strip()
     found: list[dict] = []
-    for directory in MAC_APP_DIRS:
-        if not os.path.isdir(directory):
+    for name, bundle in _iter_mac_bundles():
+        if needle and needle not in name.lower():
             continue
-        for entry in sorted(os.listdir(directory)):
-            if not entry.endswith(".app"):
-                continue
-            name = entry[:-4]
-            if needle and needle not in name.lower():
-                continue
-            found.append({"name": name, "exec": name,
-                          "bundle": os.path.join(directory, entry)})
-            if len(found) >= limit:
-                return found
+        found.append({"name": name, "exec": name, "bundle": bundle})
+        if len(found) >= limit:
+            return found
     return found
 
 

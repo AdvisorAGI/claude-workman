@@ -1,0 +1,12 @@
+#!/bin/sh
+# Stdio entry for the Workman connector (python -m workman.server).
+# Used by the Claude/Grok plugin (.mcp.json) and as a CLI launcher.
+set -u
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" -m workman.server
+fi
+if [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  exec "$ROOT/.venv/Scripts/python.exe" -m workman.server
+fi
+exec python3 -m workman.server

@@ -1,0 +1,5 @@
+#!/bin/sh
+set -eu
+ROOT=$(CDPATH= cd -- "$(dirname -- "$0")/.." && pwd)
+PY=${WORKMAN_FLEET_PYTHON:-/home/monzurul/workman/.venv/bin/python}
+exec "$PY" "$ROOT/scripts/fleet.py" "$@"

@@ -12,9 +12,17 @@ process name — never `pkill -f orca`, which self-matches its own shell command
 from __future__ import annotations
 import os
 import subprocess
+import sys
 import time
 
 DISPLAY = os.environ.get("WORKMAN_DISPLAY") or os.environ.get("DISPLAY") or ":0"
+
+#: Appended (never prepended) so a venv package still wins over dist-packages.
+_SYSTEM_DIST = "/usr/lib/python3/dist-packages"
+
+
+class AtspiUnavailable(Exception):
+    """gi / Atspi typelib is missing. Public functions turn this into a dict."""
 
 
 def _env() -> dict:
@@ -50,11 +58,49 @@ def disable_web() -> dict:
     return {"ok": True}
 
 
+def _gi_unavailable(exc: BaseException | None = None) -> dict:
+    detail = f"{type(exc).__name__}: {exc}" if exc else ""
+    out = {
+        "ok": False,
+        "error": f"AT-SPI unavailable: gi not importable ({sys.executable})",
+    }
+    if detail:
+        out["detail"] = detail
+    return out
+
+
+def _load_gi():
+    """Import gi from the venv, or from system dist-packages without putting
+    that directory ahead of the venv."""
+    try:
+        import gi
+        if gi is None:
+            raise ImportError("gi not importable")
+        return gi
+    except ImportError:
+        pass
+    sys.modules.pop("gi", None)
+    if os.path.isdir(os.path.join(_SYSTEM_DIST, "gi")) and _SYSTEM_DIST not in sys.path:
+        sys.path.append(_SYSTEM_DIST)
+    try:
+        import gi
+    except ImportError as exc:
+        raise AtspiUnavailable("gi not importable") from exc
+    if gi is None:
+        raise AtspiUnavailable("gi not importable")
+    return gi
+
+
 def _atspi():
-    import gi
-    gi.require_version("Atspi", "2.0")
-    from gi.repository import Atspi  # noqa
-    return Atspi
+    try:
+        gi = _load_gi()
+        gi.require_version("Atspi", "2.0")
+        from gi.repository import Atspi  # noqa
+        return Atspi
+    except AtspiUnavailable:
+        raise
+    except (ImportError, ModuleNotFoundError, ValueError, AttributeError) as exc:
+        raise AtspiUnavailable(str(exc)) from exc
 
 
 ACTIONABLE = {"push button", "button", "toggle button", "check box", "radio button",
@@ -63,7 +109,10 @@ ACTIONABLE = {"push button", "button", "toggle button", "check box", "radio butt
 
 def tree(app: str | None = None, actionable_only: bool = True, limit: int = 400) -> list[dict]:
     """Return elements as {app, role, name, x, y, w, h} with screen coords."""
-    Atspi = _atspi()
+    try:
+        Atspi = _atspi()
+    except AtspiUnavailable as exc:
+        return [_gi_unavailable(exc)]
     out: list[dict] = []
     desktop = Atspi.get_desktop(0)
     for i in range(desktop.get_child_count()):
@@ -108,17 +157,79 @@ def find(name: str, role: str | None = None, app: str | None = None) -> dict | N
     return None
 
 
+#: Toolkits and app names behind which a web page (or an Electron app) sits.
+#: Inside those, an AT-SPI action fires a click or input with no pointer or
+#: key events at all, which a page can see. So the tree is used to FIND the
+#: element and the real pointer and keyboard do the acting.
+BROWSER_TOOLKITS = ("chromium", "chrome", "gecko", "firefox", "electron", "webkit")
+BROWSER_APPS = ("chrome", "chromium", "firefox", "brave", "vivaldi", "opera",
+                "edge", "electron", "claude", "code", "slack", "discord")
+
+
+def _application_of(node):
+    """The Application accessible an element belongs to."""
+    try:
+        app = node.get_application()
+        if app is not None:
+            return app
+    except Exception:
+        pass
+    cur = node
+    for _ in range(64):
+        try:
+            parent = cur.get_parent()
+        except Exception:
+            return None
+        if parent is None:
+            return cur
+        cur = parent
+    return None
+
+
+def is_browser_element(node) -> bool:
+    """True when the element lives in a browser or Electron window."""
+    app = _application_of(node)
+    if app is None:
+        return False
+    try:
+        toolkit = (app.get_toolkit_name() or "").lower()
+    except Exception:
+        toolkit = ""
+    try:
+        name = (app.get_name() or "").lower()
+    except Exception:
+        name = ""
+    return any(t in toolkit for t in BROWSER_TOOLKITS) or any(a in name for a in BROWSER_APPS)
+
+
+def _human_click_info(info: dict) -> dict:
+    """Click an element's box with the real pointer (Human Mode aware)."""
+    from . import desktop, human
+    if human.enabled():
+        return human.human_click_element(info)
+    if info.get("w") and info.get("h"):
+        px, py = human.jitter_point(int(info["x"]), int(info["y"]),
+                                    int(info["w"]), int(info["h"]))
+    else:
+        px, py = int(info.get("cx", 0)), int(info.get("cy", 0))
+    out = desktop.click(px, py)
+    if isinstance(out, dict):
+        out["aimed"] = [px, py]
+    return out
+
+
 def click_element(name: str, role: str | None = None, app: str | None = None) -> dict:
-    """Find an element by role+name and click its center via xdotool."""
+    """Find an element by role+name and click inside its box with the real
+    pointer: a Gaussian point in the box, not the exact centre every time."""
     el = find(name, role=role, app=app)
     if not el:
         return {"ok": False, "error": f"no element name~={name!r} role={role} app={app}"}
-    from . import human, x11
-    if human.enabled():
-        human.human_click(el["cx"], el["cy"])
-    else:
-        x11.click(el["cx"], el["cy"])
-    return {"ok": True, "clicked": el}
+    result = _human_click_info(el)
+    if isinstance(result, dict) and result.get("ok") is False:
+        out = dict(result)
+        out["element"] = el
+        return out
+    return {"ok": True, "clicked": el, "aimed": (result or {}).get("aimed")}
 
 
 # ---- acting THROUGH the tree instead of at pixels ---------------------------
@@ -160,7 +271,10 @@ def _describe(node, app_name: str = "") -> dict:
 
 def find_node(name: str, role: str | None = None, app: str | None = None):
     """Return the live Accessible for an element, not just its coordinates."""
-    Atspi = _atspi()
+    try:
+        Atspi = _atspi()
+    except AtspiUnavailable:
+        return None, None
     needle = (name or "").lower()
     hit = {}
 
@@ -217,6 +331,16 @@ def perform_action(name: str, action: str = "click", role: str | None = None,
     node, info = find_node(name, role=role, app=app)
     if node is None:
         return {"ok": False, "error": f"no element name~={name!r} role={role} app={app}"}
+    if is_browser_element(node):
+        # In a page, do_action is a click with no pointer events: a tell.
+        # The tree found the element; the real pointer presses it.
+        result = _human_click_info(info)
+        if isinstance(result, dict) and result.get("ok") is False:
+            out = dict(result)
+            out.update({"element": info, "via": "pointer"})
+            return out
+        return {"ok": True, "performed": action, "via": "pointer", "element": info,
+                "aimed": (result or {}).get("aimed")}
     try:
         iface = node.get_action_iface()
         if iface is None:
@@ -226,7 +350,7 @@ def perform_action(name: str, action: str = "click", role: str | None = None,
         for index, candidate in enumerate(available):
             if (candidate or "").lower() == wanted:
                 iface.do_action(index)
-                return {"ok": True, "performed": candidate, "element": info}
+                return {"ok": True, "performed": candidate, "via": "atspi", "element": info}
         return {"ok": False, "error": f"action {action!r} not declared",
                 "available": available, "element": info}
     except Exception as exc:
@@ -243,6 +367,8 @@ def set_value(name: str, value: str, role: str | None = None,
     node, info = find_node(name, role=role, app=app)
     if node is None:
         return {"ok": False, "error": f"no element name~={name!r} role={role} app={app}"}
+    if is_browser_element(node):
+        return _type_into_browser_field(info, value)
     try:
         editable = node.get_editable_text_iface()
         if editable is not None:
@@ -260,10 +386,42 @@ def set_value(name: str, value: str, role: str | None = None,
     return {"ok": False, "error": "element is not editable", "element": info}
 
 
+def _type_into_browser_field(info: dict, value: str) -> dict:
+    """Set a page field the way a person does: click into it, select all
+    with the keyboard, type the new value with human cadence. Setting the
+    text through AT-SPI would fire an input event with no keys behind it."""
+    from . import desktop, human
+    clicked = _human_click_info(info)
+    if isinstance(clicked, dict) and clicked.get("ok") is False:
+        out = dict(clicked)
+        out.update({"element": info, "via": "pointer+keys", "stage": "focus"})
+        return out
+    time.sleep(0.12)
+    sel = desktop.press_key("ctrl+a")
+    if isinstance(sel, dict) and sel.get("ok") is False:
+        out = dict(sel)
+        out.update({"element": info, "via": "pointer+keys", "stage": "select_all"})
+        return out
+    time.sleep(0.08)
+    if human.enabled():
+        typed = human.human_type(value, typos=False)
+    else:
+        typed = desktop.type_text(value)
+    if isinstance(typed, dict) and typed.get("ok") is False:
+        out = dict(typed)
+        out.update({"element": info, "via": "pointer+keys", "stage": "type"})
+        return out
+    return {"ok": True, "set": len(value), "via": "pointer+keys", "element": info,
+            "aimed": (clicked or {}).get("aimed")}
+
+
 def focused_element() -> dict:
     """The element that currently has keyboard focus — the reliable way to check
     that a click actually landed before typing into it."""
-    Atspi = _atspi()
+    try:
+        Atspi = _atspi()
+    except AtspiUnavailable as exc:
+        return _gi_unavailable(exc)
     desktop = Atspi.get_desktop(0)
     found = {}
     for i in range(desktop.get_child_count()):
@@ -277,6 +435,16 @@ def focused_element() -> dict:
                 states = node.get_state_set()
                 if states and states.contains(Atspi.StateType.FOCUSED):
                     found["info"] = _describe(node, app_name)
+                    try:
+                        found["info"]["editable"] = bool(
+                            states.contains(Atspi.StateType.EDITABLE))
+                    except Exception:
+                        pass
+                    try:
+                        found["info"]["showing"] = bool(
+                            states.contains(Atspi.StateType.SHOWING))
+                    except Exception:
+                        pass
                     return True
             except Exception:
                 return False

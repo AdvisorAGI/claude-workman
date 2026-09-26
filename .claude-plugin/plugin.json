@@ -1,0 +1,19 @@
+{
+  "name": "workman",
+  "version": "0.3.0",
+  "description": "Human-mode desktop control as an MCP connector for Linux, macOS and Windows. Screenshot, zoom, click, type, windows, accessibility, and layout_agent (1/4 session strip, 3/4 work pane).",
+  "author": {
+    "name": "Atmosphere AI"
+  },
+  "homepage": "https://github.com/AdvisorAGI/claude-workman",
+  "keywords": [
+    "computer-use",
+    "mcp",
+    "desktop",
+    "screenshot",
+    "automation",
+    "linux",
+    "macos",
+    "windows"
+  ]
+}

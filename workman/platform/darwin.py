@@ -21,6 +21,7 @@ list; without it the backend still sees (`screencapture`) and can act through
 from __future__ import annotations
 
 import os
+import re
 import shutil
 import subprocess
 import tempfile
@@ -295,6 +296,33 @@ def active_window() -> dict:
             "x": 0, "y": 0, "w": 0, "h": 0}
 
 
+def focused_window_identity() -> dict | None:
+    """The frontmost app window's owner and title from one Quartz window-list
+    read; None without Quartz (an osascript per keystroke is far too slow)."""
+    if _quartz() is None:
+        return None
+    wins = list_windows()
+    if not wins:
+        return None
+    return {"ok": True, "class": wins[0].get("app") or "", "app": wins[0].get("app") or "",
+            "name": wins[0].get("title") or ""}
+
+
+def window_at_point(x: int, y: int) -> dict | None:
+    """Frontmost on-screen window whose frame contains (x, y), or None."""
+    for w in list_windows():
+        try:
+            wx, wy, ww, wh = (int(w.get(k) or 0) for k in ("x", "y", "w", "h"))
+        except (TypeError, ValueError):
+            continue
+        if ww <= 0 or wh <= 0:
+            continue
+        if wx <= x < wx + ww and wy <= y < wy + wh:
+            return {"ok": True, "class": w.get("app") or "", "app": w.get("app") or "",
+                    "name": w.get("title") or w.get("name") or ""}
+    return None
+
+
 def kill_window(query: str) -> dict:
     """Terminate the owning process, matching the Linux backend's semantics.
 
@@ -356,6 +384,46 @@ _SHIFTED = {"plus": "equal", "underscore": "minus", "colon": "semicolon",
             "less": "comma", "greater": "period", "bar": "backslash",
             "quotedbl": "quote", "asciitilde": "grave"}
 
+# Characters -> the US-layout key a person presses for them; True means a real
+# Shift key goes down around it, so a page sees shiftKey AND a Shift keydown.
+_US_PLAIN = {" ": "space", "-": "minus", "=": "equal", "[": "bracketleft",
+             "]": "bracketright", "\\": "backslash", ";": "semicolon",
+             "'": "apostrophe", "`": "grave", ",": "comma", ".": "period",
+             "/": "slash", "\t": "tab", "\n": "return", "\r": "return"}
+_US_SHIFT = {"~": "grave", "!": "1", "@": "2", "#": "3", "$": "4", "%": "5",
+             "^": "6", "&": "7", "*": "8", "(": "9", ")": "0", "_": "minus",
+             "+": "equal", "{": "bracketleft", "}": "bracketright", "|": "backslash",
+             ":": "semicolon", '"': "apostrophe", "<": "comma", ">": "period",
+             "?": "slash"}
+US_CHARS: dict[str, tuple[int, bool]] = {
+    **{c: (_KEYCODES[c], False) for c in "abcdefghijklmnopqrstuvwxyz0123456789"},
+    **{c.upper(): (_KEYCODES[c], True) for c in "abcdefghijklmnopqrstuvwxyz"},
+    **{c: (_KEYCODES[n], False) for c, n in _US_PLAIN.items()},
+    **{c: (_KEYCODES[n], True) for c, n in _US_SHIFT.items()},
+}
+#: Longest a synthetic key may stay down, or a typing gap last (caller input).
+MAX_KEY_MS = 1000
+#: After pasting an off-layout character, wait this long then put the owner's
+#: clipboard back. A page's paste handler reads the clipboard asynchronously.
+PASTE_RESTORE_S = 0.3
+#: App names behind which a web page or an Electron shell sits: there a page
+#: can see how input arrived, so it must arrive as a person's would.
+BROWSER_APPS = frozenset({"chrome", "chromium", "safari", "arc", "brave", "edge",
+                          "firefox", "opera", "vivaldi", "orion", "electron", "claude",
+                          "cursor", "slack", "code", "discord"})
+
+
+def char_key(ch: str) -> tuple[int | None, bool]:
+    """(virtual keycode, needs Shift) for one character on a US layout, or
+    (None, False) when that layout has no key for it."""
+    return US_CHARS.get(ch, (None, False))
+
+
+def is_browser_app(name: str) -> bool:
+    """True when an app name is a browser, a WebKit shell or an Electron app."""
+    low = (name or "").lower()
+    return "webkit" in low or any(w in BROWSER_APPS for w in re.split(r"[^a-z0-9]+", low))
+
 
 def keycode_for(name: str) -> tuple[int | None, bool]:
     """(virtual keycode, needs_shift) for an xdotool-style key name."""
@@ -377,6 +445,35 @@ def _flags_for(mods: list[str]) -> int:
     for m in mods:
         value |= _CG_FLAGS.get(m, 0)
     return value
+
+
+# Where this process last put the pointer. Quartz posts and physical motion
+# share one cursor, so the tell that the owner moved the mouse is the pointer
+# not being where the agent left it.
+_LAST_PLACED: dict = {"at": None}
+FOREIGN_MOTION_PX = 3
+
+
+def _placed(x: int, y: int) -> None:
+    _LAST_PLACED["at"] = (int(x), int(y))
+
+
+def foreign_pointer_motion(tolerance: int = FOREIGN_MOTION_PX) -> bool:
+    """True when the pointer moved since the agent last placed it: somebody
+    else has the mouse. One CGEventGetLocation; nothing is polled."""
+    Q = _quartz()
+    at = _LAST_PLACED["at"]
+    if Q is None or at is None:
+        return False
+    try:
+        loc = Q.CGEventGetLocation(Q.CGEventCreate(None))
+        px, py = int(loc.x), int(loc.y)
+    except Exception:
+        return False
+    if abs(px - at[0]) > tolerance or abs(py - at[1]) > tolerance:
+        _LAST_PLACED["at"] = None
+        return True
+    return False
 
 
 def _post_mouse(kind: str, x: int, y: int, button: int = 1, clicks: int = 1,
@@ -402,12 +499,15 @@ def _post_mouse(kind: str, x: int, y: int, button: int = 1, clicks: int = 1,
 
     if kind == "move":
         post(Q.kCGEventMouseMoved)
+        _placed(x, y)
         return True
     if kind == "down":
         post(down, 1)
+        _placed(x, y)
         return True
     if kind == "up":
         post(up, 1)
+        _placed(x, y)
         return True
     post(Q.kCGEventMouseMoved)
     for n in range(1, max(1, clicks) + 1):
@@ -415,6 +515,7 @@ def _post_mouse(kind: str, x: int, y: int, button: int = 1, clicks: int = 1,
         # two singles; macOS reads it from the event, not from the timing.
         post(down, n)
         post(up, n)
+    _placed(x, y)
     return True
 
 
@@ -424,6 +525,7 @@ def move(x: int, y: int) -> dict:
         return {"ok": True, "at": [x, y], "via": "quartz"}
     if _has("cliclick"):
         _run(["cliclick", f"m:{x},{y}"])
+        _placed(x, y)
         return {"ok": True, "at": [x, y], "via": "cliclick"}
     return base.unsupported("pointer move", PLATFORM,
                             "install pyobjc (pip install pyobjc-framework-Quartz) "
@@ -439,6 +541,7 @@ def click(x: int, y: int, button: int = 1, count: int = 1) -> dict:
         verb = {1: "c", 2: "tc", 3: "rc"}.get(button, "c")
         for _ in range(max(1, count)):
             _run(["cliclick", f"{verb}:{x},{y}"])
+        _placed(x, y)
         return {"ok": True, "clicked": [x, y], "button": button, "count": count,
                 "via": "cliclick"}
     res = _osa(f'tell application "System Events" to click at {{{x}, {y}}}')
@@ -472,6 +575,7 @@ def click_with(x: int, y: int, button: int = 1, count: int = 1,
                          "meta": "cmd"}[m] for m in mods)
         verb = {1: "c", 2: "tc", 3: "rc"}.get(button, "c")
         _run(["cliclick", f"kd:{keys}", f"{verb}:{x},{y}", f"ku:{keys}"])
+        _placed(x, y)
         return {"ok": True, "clicked": [x, y], "button": button, "count": count,
                 "modifiers": mods, "via": "cliclick"}
     return base.unsupported("modifier-qualified click", PLATFORM,
@@ -489,6 +593,7 @@ def mouse_down(button: int = 1, x: int | None = None, y: int | None = None) -> d
         return {"ok": True, "held": button, "at": [x, y], "via": "quartz"}
     if _has("cliclick"):
         _run(["cliclick", f"dd:{x},{y}"])
+        _placed(x, y)
         return {"ok": True, "held": button, "at": [x, y], "via": "cliclick"}
     return base.unsupported("mouse_down", PLATFORM, "install pyobjc or cliclick")
 
@@ -501,6 +606,7 @@ def mouse_up(button: int = 1, x: int | None = None, y: int | None = None) -> dic
         return {"ok": True, "released": button, "via": "quartz"}
     if _has("cliclick"):
         _run(["cliclick", f"du:{x},{y}"])
+        _placed(x, y)
         return {"ok": True, "released": button, "via": "cliclick"}
     return base.unsupported("mouse_up", PLATFORM, "install pyobjc or cliclick")
 
@@ -526,6 +632,7 @@ def drag(from_x: int, from_y: int, to_x: int, to_y: int) -> dict:
                 "via": "quartz"}
     if _has("cliclick"):
         _run(["cliclick", f"dd:{from_x},{from_y}", f"du:{to_x},{to_y}"])
+        _placed(to_x, to_y)
         return {"ok": True, "from": [from_x, from_y], "to": [to_x, to_y],
                 "via": "cliclick"}
     return base.unsupported("drag", PLATFORM, "install pyobjc or cliclick")
@@ -576,20 +683,60 @@ def pointer_position() -> dict:
                             "install pyobjc or cliclick")
 
 
-def _post_key(code: int, down: bool, flags: int = 0) -> bool:
+def _ms(value) -> int:
+    """A caller's hold or gap in ms, bounded so no key stays down for long."""
+    try:
+        return max(0, min(int(value or 0), MAX_KEY_MS))
+    except (TypeError, ValueError):
+        return 0
+
+
+def _post_key(code: int, down: bool, flags: int = 0, text: str | None = None) -> bool:
     Q = _quartz()
     if Q is None:
         return False
     ev = Q.CGEventCreateKeyboardEvent(None, code, down)
     if flags:
         Q.CGEventSetFlags(ev, flags)
+    if text:
+        # The characters a real event carries, so the text is right whatever
+        # the layout. The count is UTF-16 units: an emoji is two.
+        Q.CGEventKeyboardSetUnicodeString(ev, len(text.encode("utf-16-le")) // 2, text)
     Q.CGEventPost(Q.kCGHIDEventTap, ev)
     return True
 
 
-def press_key(key: str) -> dict:
+def _stroke(code: int, mods: list[str], hold_ms: int = 0, text: str | None = None) -> None:
+    """One keystroke as a person makes it: each modifier is a real key going
+    down first (not only a flag on the key), the key is held for hold_ms,
+    then everything comes back up in reverse, even when interrupted."""
+    held = 0
+    down: list[tuple[int, int]] = []
+    try:
+        for m in mods:
+            mcode = _MOD_KEYCODE.get(m)
+            if mcode is None or any(c == mcode for c, _ in down):
+                continue
+            held |= _CG_FLAGS.get(m, 0)
+            _post_key(mcode, True, held)
+            down.append((mcode, _CG_FLAGS.get(m, 0)))
+        _post_key(code, True, held, text)
+        try:
+            if hold_ms > 0:
+                time.sleep(hold_ms / 1000.0)
+        finally:
+            _post_key(code, False, held, text)
+    finally:
+        for mcode, bit in reversed(down):
+            held &= ~bit
+            _post_key(mcode, False, held)
+
+
+def press_key(key: str, hold_ms: int = 0) -> dict:
     """xdotool key syntax, translated: 'Return', 'ctrl+c', 'super+l', 'KP_0'.
-    `super` is Command here, so a model can write one combo for every OS."""
+    `super` is Command here, so a model can write one combo for every OS.
+    hold_ms keeps the key down that long (Human Mode's dwell), with real
+    modifier key events around it."""
     mods, name = base.split_combo(key)
     code, needs_shift = keycode_for(name)
     if code is None:
@@ -597,9 +744,8 @@ def press_key(key: str) -> dict:
                 "hint": "use xdotool names: Return, Tab, Escape, ctrl+c, super+space"}
     if needs_shift and "shift" not in mods:
         mods = mods + ["shift"]
-    flags = _flags_for(mods)
-    if _post_key(code, True, flags):
-        _post_key(code, False, flags)
+    if _quartz() is not None:
+        _stroke(code, mods, _ms(hold_ms))
         return {"ok": True, "key": key, "via": "quartz"}
     using = " using {" + ", ".join(
         {"super": "command down", "ctrl": "control down", "alt": "option down",
@@ -636,24 +782,73 @@ def key_up(key: str) -> dict:
                             "held keys need pyobjc-framework-Quartz")
 
 
-def type_text(text: str, delay_ms: int = 40) -> dict:
-    """Type a literal string.
+def release_all() -> dict:
+    """hand_back's release beyond the agent's tracked holds: on macOS that is
+    nothing, and the result says it cannot be verified."""
+    # XTEST keeps a per-device held state that can be queried and cleared.
+    # Quartz does not: posted and physical input share one state table, so a
+    # key-up for a modifier the agent never pressed can cancel one the owner
+    # is physically holding. hand_back has already released the tracked holds
+    # through key_up / mouse_up (Quartz) before it asks this.
+    return {"ok": True, "verified": None, "released_blind": False,
+            "note": "macOS: tracked holds released one by one; no per-source held "
+                    "state to verify against, so nothing is released blind"}
 
-    Quartz sends each character as a unicode payload rather than a keycode, so
-    the text is layout-independent: an accented character or an emoji arrives
-    intact on a keyboard that has no key for it.
+
+def _frontmost_is_browser() -> bool:
+    return is_browser_app((focused_window_identity() or {}).get("class") or "")
+
+
+def _paste(text: str, hold_ms: int = 0) -> dict:
+    """The way a person enters a character their keyboard has no key for."""
+    setres = clipboard_set(text=text)
+    if not setres.get("ok"):
+        return setres
+    return press_key("super+v", hold_ms=hold_ms)
+
+
+def type_text(text: str, delay_ms: int = 40, dwell_ms: int = 0) -> dict:
+    """Type a literal string as the keys a person presses for it.
+
+    Each character a US layout has is sent on its real virtual keycode, so a
+    page reads a real event.code, with a real Shift press around capitals and
+    shifted symbols; dwell_ms holds each key down, delay_ms is the gap after.
+    A character the layout lacks is pasted when a browser is in front (there
+    a bare unicode payload arrives with an empty event.code) and sent as a
+    unicode payload in a native app, where it arrives intact.
     """
+    # Fixed 2026-09-12: every character went out as a unicode payload on
+    # keycode 0: an empty event.code and no Shift on capitals, a page's tell.
     Q = _quartz()
     if Q is not None:
-        for ch in text:
-            ev = Q.CGEventCreateKeyboardEvent(None, 0, True)
-            Q.CGEventKeyboardSetUnicodeString(ev, len(ch), ch)
-            Q.CGEventPost(Q.kCGHIDEventTap, ev)
-            up = Q.CGEventCreateKeyboardEvent(None, 0, False)
-            Q.CGEventKeyboardSetUnicodeString(up, len(ch), ch)
-            Q.CGEventPost(Q.kCGHIDEventTap, up)
-            time.sleep(max(0, delay_ms) / 1000.0)
-        return {"ok": True, "typed_len": len(text), "via": "quartz"}
+        dwell, gap = _ms(dwell_ms), _ms(delay_ms)
+        browser: bool | None = None
+        saved = None
+        try:
+            for i, ch in enumerate(text):
+                code, shift = char_key(ch)
+                if code is not None:
+                    _stroke(code, ["shift"] if shift else [], dwell,
+                            ch if ch.isprintable() else None)
+                else:
+                    if browser is None:
+                        browser = _frontmost_is_browser()
+                    if browser:
+                        if saved is None:
+                            saved = clipboard_get()
+                        pasted = _paste(ch, dwell)
+                        if not pasted.get("ok"):
+                            return {"ok": False, "error": f"paste failed: {pasted.get('error')}",
+                                    "typed_len": i, "via": "quartz+paste"}
+                    else:
+                        _stroke(0, [], dwell, ch)
+                if gap:
+                    time.sleep(gap / 1000.0)
+            return {"ok": True, "typed_len": len(text), "via": "quartz"}
+        finally:
+            if saved is not None and saved.get("ok"):
+                time.sleep(PASTE_RESTORE_S)
+                clipboard_set(text=saved.get("text") or "")
     escaped = text.replace("\\", "\\\\").replace('"', '\\"')
     res = _osa(f'tell application "System Events" to keystroke "{escaped}"')
     if res.returncode == 0:
@@ -677,8 +872,7 @@ def clipboard_set(text: str = "", selection: str = "clipboard") -> dict:
     if selection == "primary":
         return {"ok": False, "error": "macOS has no PRIMARY selection",
                 "hint": "use selection='clipboard'"}
-    res = subprocess.run(["pbcopy"], input=text, text=True, capture_output=True,
-                         timeout=20)
+    res = _run(["pbcopy"], input=text)
     if res.returncode != 0:
         return {"ok": False, "error": res.stderr.strip() or "pbcopy failed"}
     return {"ok": True, "set_len": len(text), "selection": "clipboard"}
@@ -807,6 +1001,8 @@ def platform_info() -> dict:
         "quartz": _quartz() is not None,
         "tools": {name: _has(name) for name in
                   ("screencapture", "osascript", "sips", "cliclick", "pbcopy")},
+        "input_channel": ("quartz" if _quartz() is not None else
+                          "cliclick" if _has("cliclick") else "osascript"),
         "modifier_super": "Command",
         "permissions": {
             "screen_recording": "System Settings > Privacy & Security > Screen Recording",

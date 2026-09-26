@@ -62,7 +62,12 @@ def tree(app: str | None = None, actionable_only: bool = True,
     impl = _impl()
     if impl is None:
         return [_refuse("accessibility_tree")]
-    return impl.tree(app=app, actionable_only=actionable_only, limit=limit)
+    try:
+        return impl.tree(app=app, actionable_only=actionable_only, limit=limit)
+    except (ImportError, ModuleNotFoundError, ValueError, AttributeError) as exc:
+        return [{"ok": False,
+                 "error": f"AT-SPI unavailable: gi not importable ({sys.executable})",
+                 "detail": f"{type(exc).__name__}: {exc}"}]
 
 
 def click_element(name: str, role: str | None = None,
@@ -101,7 +106,12 @@ def focused_element() -> dict:
     impl = _impl()
     if impl is None:
         return _refuse("focused_element")
-    return impl.focused_element()
+    try:
+        return impl.focused_element()
+    except (ImportError, ModuleNotFoundError, ValueError, AttributeError) as exc:
+        return {"ok": False,
+                "error": f"AT-SPI unavailable: gi not importable ({sys.executable})",
+                "detail": f"{type(exc).__name__}: {exc}"}
 
 
 def wait_for_element(name: str, role: str | None = None, app: str | None = None,

@@ -8,10 +8,11 @@
 - Repository: https://github.com/AdvisorAGI/claude-workman
 - License: MIT
 - Language: Python 3.10+
-- Platform: Linux / X11 (Wayland and macOS backends planned)
-- Install: `pip install claude-workman`
-- Run: `python -m workman.server` (stdio MCP server)
-- Register with Claude Code: `claude mcp add --scope user workman -- python -m workman.server`
+- Platform: Linux / macOS / Windows
+- Install from source: `python3 -m venv .venv && .venv/bin/pip install -e ".[macos]"` (Linux: `.[extras]`, Windows: `.[windows]`)
+- Run: `python -m workman.server` (stdio MCP connector)
+- Connector: `claude mcp add --scope user workman -- .venv/bin/python -m workman.server`
+- Plugin: `claude plugin install .` or `grok plugin install . --trust`
 
 ## What it is
 
@@ -33,6 +34,7 @@ remain available as a fallback.
 - `accessibility_tree` — actionable elements as {app, role, name, x, y, w, h}
 - `click_element` — find by role + name, click the element center (no pixel guessing)
 - `enable_accessibility` — enable AT-SPI tree export, and stop the screen reader from speaking
+- `layout_agent` — park the session app in a 1/4 strip; the work app fills 3/4
 - `list_windows`, `focus_window` — enumerate and raise windows
 - `click`, `move`, `drag`, `scroll` — pointer actions
 - `type_text`, `press_key` — keyboard input, xdotool key syntax

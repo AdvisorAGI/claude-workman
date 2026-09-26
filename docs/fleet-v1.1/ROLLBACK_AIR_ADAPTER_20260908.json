@@ -1,0 +1,13 @@
+{
+  "node": "air",
+  "installed_at": "2026-09-08T01:10:36Z",
+  "files": [
+    {
+      "path": "/Users/muhammadtariqul/.claude/tools/workman-fleet-v1.1/device.py",
+      "sha256": "e98c994f8ea17fe02a34a47eaadef33f6c0be541f8bd2a726791da975e7248ef",
+      "previous_sha256": "4d623f8578d52d96f7276ccb04b376ee9f19d3bfa0af135da416aca516413fc1",
+      "backup": "/Users/muhammadtariqul/.claude/tools/workman-fleet-v1.1/backups/20260908T011036Z/device.py"
+    }
+  ],
+  "restart_required": false
+}

@@ -39,7 +39,8 @@ class TestHumanReexports:
         assert chrome.eased_path is human.eased_path
         assert chrome.human_click is human.human_click
         assert chrome.human_move is human.human_move
-        assert chrome.PATH_STEPS == human.PATH_STEPS
+        assert chrome.PATH_MIN_STEPS == human.PATH_MIN_STEPS
+        assert chrome.MOTION_HZ == human.MOTION_HZ
         assert chrome.PATH_WAYPOINTS == human.PATH_WAYPOINTS
 
 
@@ -76,7 +77,20 @@ class TestCdpParsing:
         assert chrome.select_tab(tabs, "nope") is None
         assert chrome.select_tab(tabs, "") is None
 
+    def test_cdp_is_off_by_default_and_never_touches_the_port(self, monkeypatch):
+        monkeypatch.delenv(chrome.CDP_ENV, raising=False)
+
+        def boom(*a, **k):
+            raise AssertionError("urlopen must not be called with CDP off")
+
+        monkeypatch.setattr(chrome.urllib.request, "urlopen", boom)
+        assert chrome.cdp_enabled() is False
+        payload, err = chrome.cdp_request("/json")
+        assert payload is None
+        assert "disabled" in err and chrome.CDP_ENV in err
+
     def test_cdp_request_parses_json_via_urlopen(self, monkeypatch):
+        monkeypatch.setenv(chrome.CDP_ENV, "1")
         body = json.dumps(CDP_PAGES)
         monkeypatch.setattr(chrome.urllib.request, "urlopen",
                             lambda *a, **k: FakeHTTP(body))
@@ -87,6 +101,7 @@ class TestCdpParsing:
         assert tabs[0]["id"] == "t1"
 
     def test_cdp_request_accepts_plain_text_activate(self, monkeypatch):
+        monkeypatch.setenv(chrome.CDP_ENV, "1")
         monkeypatch.setattr(chrome.urllib.request, "urlopen",
                             lambda *a, **k: FakeHTTP("Target is activating"))
         payload, err = chrome.cdp_request("/json/activate/t1")
@@ -94,6 +109,8 @@ class TestCdpParsing:
         assert payload["ok"] is True
 
     def test_cdp_unreachable_is_not_an_exception(self, monkeypatch):
+        monkeypatch.setenv(chrome.CDP_ENV, "1")
+
         def boom(*a, **k):
             raise urllib.error.URLError("Connection refused")
 
@@ -101,6 +118,14 @@ class TestCdpParsing:
         payload, err = chrome.cdp_request("/json")
         assert payload is None
         assert "refused" in err.lower() or "Connection" in err
+
+    def test_challenge_titles_are_recognised(self):
+        assert chrome.looks_like_challenge("Just a moment... - Google Chrome")
+        assert chrome.looks_like_challenge("Verify you are human")
+        assert chrome.looks_like_challenge("", "Checking your browser before accessing the site")
+        assert not chrome.looks_like_challenge("Inbox - Gmail - Google Chrome")
+        # Only the top of the page counts: a mention deep in an article is not a wall.
+        assert not chrome.looks_like_challenge("Blog", ("x" * 700) + "recaptcha")
 
     def test_is_loading_uses_cdp_flag_and_blank_title(self):
         assert chrome.is_loading({"loading": True, "title": "Hi", "url": "https://x"})
@@ -232,8 +257,10 @@ class TestOpenUrlAndType:
     def test_type_text_human_types_per_character(self, monkeypatch):
         from workman import human
         typed = []
+        dwells = []
         monkeypatch.setattr(chrome.desktop, "type_text",
-                            lambda text, delay_ms=40: typed.append(text) or
+                            lambda text, delay_ms=40, dwell_ms=0: (typed.append(text),
+                                                                   dwells.append(dwell_ms)) and
                             {"ok": True, "typed_len": len(text)})
         monkeypatch.setattr(chrome.desktop, "press_key",
                             lambda k: typed.append(f"<{k}>") or {"ok": True})
@@ -242,6 +269,9 @@ class TestOpenUrlAndType:
         assert result["human"] is True
         assert typed[0] == "a" and typed[1] == "b"
         assert "<Return>" in typed
+        # Each key is held for a real dwell, not tapped for 0 ms.
+        lo, hi = human.KEY_DWELL_MS
+        assert all(lo <= d <= hi for d in dwells)
 
     def test_type_text_non_human_is_one_shot(self, monkeypatch):
         typed = []
@@ -270,7 +300,10 @@ class TestReadClickWait:
         names = {e["name"] for e in result["elements"]}
         assert names == {"Next", "OK"}
 
-    def test_click_text_human_clicks_center(self, monkeypatch):
+    def test_click_text_aims_inside_the_box_not_the_centre(self, monkeypatch):
+        """Regression (2026-09-12): click_text aimed at the exact centre every
+        time; it now aims as atspi.click_element does, inside the box."""
+        from workman import human
         el = {"role": "link", "name": "Pricing", "x": 10, "y": 20, "w": 40, "h": 10,
               "cx": 30, "cy": 25}
         monkeypatch.setattr(chrome, "focus", lambda: {"ok": True, "id": "1", "title": "T"})
@@ -278,13 +311,16 @@ class TestReadClickWait:
                             lambda: {"id": "1", "name": "T", "x": 0, "y": 0, "w": 800, "h": 600})
         monkeypatch.setattr(chrome, "_find_clickable", lambda text: dict(el))
         monkeypatch.setattr(chrome, "_in_content_area", lambda e, w: True)
-        seen = {}
-        monkeypatch.setattr(chrome, "human_click",
-                            lambda x, y, rng=None: seen.update(x=x, y=y) or
-                            {"ok": True, "press_ms": 80, "at": [x, y]})
-        result = chrome.click_text("Pricing", rng=random.Random(0))
-        assert result["ok"] is True
-        assert seen == {"x": 30, "y": 25}
+        seen = []
+        monkeypatch.setattr(human, "human_click",
+                            lambda x, y, rng=None, button=1, count=1, target_px=None:
+                            seen.append((x, y)) or {"ok": True, "press_ms": 80, "at": [x, y]})
+        for seed in range(30):
+            result = chrome.click_text("Pricing", rng=random.Random(seed))
+            assert result["ok"] is True
+            assert (result["clicked"]["x"], result["clicked"]["y"]) == seen[-1]
+        assert all(10 <= x < 50 and 20 <= y < 30 for x, y in seen)
+        assert len(set(seen)) > 1 and set(seen) != {(30, 25)}
 
     def test_human_click_moves_along_path_then_presses(self, monkeypatch):
         from workman import human
@@ -299,7 +335,8 @@ class TestReadClickWait:
         monkeypatch.setattr(human.time, "sleep", lambda s: None)
         result = chrome.human_click(100, 80, rng=random.Random(1))
         assert result["ok"] is True
-        assert human.PATH_STEPS[0] <= len(moves) <= human.PATH_STEPS[1]
+        # A mouse-report-rate path: many samples, never one teleport.
+        assert len(moves) >= human.PATH_MIN_STEPS
         assert downs == [1] and ups == [1]
         assert 60 <= result["press_ms"] <= 140
 
