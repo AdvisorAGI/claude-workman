@@ -1,0 +1,447 @@
+{
+  "_reference": {
+    "source": "MEASURED from Apple's official iOS 27 UI Kit (Figma community file 1651309003795292092, kit 27.0.2) via Figma REST API on 2026-07-29",
+    "figmaFileKey": "1he05dQDLN4F7TH3bAB3uk",
+    "kitVersion": "27.0.2 (change log dated July 16, 2026)",
+    "extracted": "2026-07-29",
+    "previousSource": "Figma iOS & iPadOS 26 Community Kit (pDmGXdYu2k8xlf1SQoU9PW), extracted 2026-03-28",
+    "plan": "../PLAN.md",
+    "inventory": "../../figma-ios27-pages.md",
+    "note": "Values carrying `_measured` were read off absoluteBoundingBox / cornerRadius / padding / itemSpacing of the kit's own components. Values without `_measured` are carried over from the iOS 26 extraction and are NOT kit-attested.",
+    "measurementBasis": "iPhone frames are 402x874pt (iPhone 16 Pro / 17 Pro bezel). iPad toolbar frames are 820-936pt wide.",
+    "figmaNodeIds": {
+      "tabBars": "507:24689",
+      "toolbars": "507:25993",
+      "lists": "507:24675",
+      "sheets": "507:24684",
+      "statusBars": "507:24686",
+      "alerts": "507:24668",
+      "buttons": "507:24673",
+      "progressIndicators": "507:24682",
+      "datePickers": "507:24680",
+      "menus": "507:24676",
+      "popovers": "507:24681",
+      "contextualMenus": "507:25994",
+      "notifications": "507:24678",
+      "materials": "215:105157",
+      "liquidGlassRegular": "5584:32504 (Large) / 5584:32503 (Medium) / 5584:32505 (Small)",
+      "changeLog": "29:95567"
+    }
+  },
+  "base": 8,
+  "scale": {
+    "0": 0,
+    "1": 4,
+    "2": 8,
+    "3": 12,
+    "4": 16,
+    "5": 20,
+    "6": 24,
+    "8": 32,
+    "10": 40,
+    "12": 48,
+    "16": 64,
+    "20": 80,
+    "24": 96
+  },
+  "inset": {
+    "xs": 8,
+    "sm": 12,
+    "md": 16,
+    "lg": 20,
+    "xl": 24,
+    "xxl": 32
+  },
+  "contentMargin": {
+    "_measured": "iPhone 16 CONFIRMED — list rows, top toolbars, section headers and grouped-table footers all use 16pt side padding on the 402pt iPhone frame. iPad 20 NOT confirmed: the kit's iPad top toolbar uses 10pt and its status bar 16pt, so 20 is unattested and was left unchanged rather than guessed at. readableWidth is not expressible in the kit and was not re-measured.",
+    "iphone": {
+      "horizontal": 16,
+      "note": "Standard left/right margin for iPhone content"
+    },
+    "ipad": {
+      "horizontal": 20,
+      "note": "Standard left/right margin for iPad content"
+    },
+    "readableWidth": {
+      "max": 672,
+      "unit": "pt",
+      "note": "Approximates UIKit readableContentGuide — caps body text line length on wide iPad/landscape layouts (~672pt). Use min(container - margins, readableWidth)."
+    }
+  },
+  "radius": {
+    "none": 0,
+    "xs": 4,
+    "sm": 8,
+    "md": 10,
+    "lg": 12,
+    "xl": 16,
+    "xxl": 20,
+    "xxxl": 26,
+    "glass": 34,
+    "full": 9999,
+    "_measured": "xxxl (26) and glass (34) added from the kit. The kit does not use a single geometric radius ramp — it assigns a radius per component. `_kitObserved` lists every distinct cornerRadius actually found so the generic ramp can be sanity-checked. Note xs (4), sm (8) and xl (16) are NOT attested anywhere in the kit; they are web-side conveniences.",
+    "_kitObserved": [
+      {
+        "r": 6,
+        "where": "collapsed date/time picker control"
+      },
+      {
+        "r": 7,
+        "where": "list row rounded image, 30pt"
+      },
+      {
+        "r": 10,
+        "where": "list header trailing image 42pt; material fill swatches 40pt"
+      },
+      {
+        "r": 11,
+        "where": "list row rounded image (tall), 44pt"
+      },
+      {
+        "r": 12,
+        "where": "borderless large button (title only)"
+      },
+      {
+        "r": 13,
+        "where": "expanded date/time picker container"
+      },
+      {
+        "r": 20,
+        "where": "menu / context-menu action tile BG; material panel"
+      },
+      {
+        "r": 23,
+        "where": "Liquid Glass - Clear"
+      },
+      {
+        "r": 24,
+        "where": "collapsed notification banner"
+      },
+      {
+        "r": 26,
+        "where": "expanded notification content background; alert text-field group"
+      },
+      {
+        "r": 30,
+        "where": "context menu content area (preview)"
+      },
+      {
+        "r": 34,
+        "where": "alert, menu, edit menu, context menu platter, Liquid Glass Regular Medium+Large, medium sheet top"
+      },
+      {
+        "r": 38,
+        "where": "popover, large sheet top, iPad sheet"
+      },
+      {
+        "r": 58,
+        "where": "medium (floating) iPhone sheet bottom"
+      },
+      {
+        "r": "pill (kit encodes 100 / 296 / 500 / 1000)",
+        "where": "all bar button items, glass buttons, tab bar platter, tab selection, grabber, progress track"
+      }
+    ],
+    "semantic": {
+      "_concentric": "For nested rounded corners (a control inside a container), the inner radius should be outer − padding so the curves stay concentric. On Apple platforms use ConcentricRectangle / containerConcentric (the system derives the radius from the container + hardware curvature). The fixed liquidGlass radii here are fallbacks for web.",
+      "card": 12,
+      "_cardNote": "NOT kit-attested — the iOS 27 kit has no standalone 'card' component. Carried over from iOS 26.",
+      "button": 9999,
+      "buttonBorderlessLarge": 12,
+      "_buttonMeasured": "Buttons page 507:24673. Every Bordered / Bordered-Prominent / Glass / Glass Prominent button is a pill (kit cornerRadius 1000). Only the Borderless + Large + title-bearing variant keeps a 12pt rounded rect; Borderless Medium/Small use 40 on a 34/28pt-tall control, i.e. effectively a pill too. Previous flat value was 12.",
+      "alert": 34,
+      "_alertMeasured": "Alert BG 'Fill + Shadow' and 'Glass Effect' both cornerRadius 34 (was 14 in iOS 26).",
+      "menu": 34,
+      "_menuMeasured": "Menu platter 'Fill + Shadow' cornerRadius 34 at every menu length (238x437 / 238x532 / 238x578). Edit Menu (238x44) also 34. Was 14.",
+      "popover": 38,
+      "_popoverMeasured": "Popover 'Background' frame cornerRadius 38 on all 12 edge/alignment variants. Was 14.",
+      "sheet": {
+        "iphoneLargeTop": 38,
+        "iphoneMediumTop": 34,
+        "iphoneMediumBottom": 58,
+        "ipad": 38,
+        "iphoneTop": 34,
+        "iphoneBottom": 58,
+        "_measured": "Sheets page 507:24684. Detent=Large and Large (Stacked) use rectangleCornerRadii [38,38,0,0] (edge-to-edge, square bottom). Detent=Medium is a floating inset card: [34,34,58,58]. iPad sheet cornerRadius 38. The legacy iphoneTop/iphoneBottom keys are retained and now map to the Medium (floating) sheet, which is what they actually described.",
+        "note": "Extracted from Kit variables: Sheet/Corner Radius"
+      },
+      "contextMenu": 34,
+      "_contextMenuMeasured": "Context Menu platter 'Fill + Shadow' 250x278 cornerRadius 34; the preview 'Content Area' above it is 30. Was 14.",
+      "notification": 24,
+      "notificationExpanded": 26,
+      "_notificationMeasured": "Collapsed banner (Stack=1/2/3, 386pt wide) cornerRadius 24; expanded 'Content Background' 370x370 cornerRadius 26. Was 20. Matches change log 'Adjusted corner radii for expanded notifications'.",
+      "appIcon": {
+        "iphone": 26,
+        "ipad": 22,
+        "gridRatio": 0.26,
+        "_measured": "The kit's '_Icon Grid' is 256x256 with cornerRadius 66.56 → ratio 0.26 of the icon side. Applied to the kit's own 66pt system icons that is ~17.2pt. LOW CONFIDENCE: the grid overlay may be drawn larger than the icon artwork, and the per-device iphone/ipad values below were not independently re-measured — they are carried over from iOS 26.",
+        "note": "Proportional to icon size"
+      },
+      "liquidGlass": {
+        "small": 1000,
+        "medium": 34,
+        "large": 34,
+        "clear": 23,
+        "_measured": "Materials page 215:105157. 'Liquid Glass - Regular - Large' (5584:32504) and '- Medium' (5584:32503) both render 'Fill + Shadow' and 'Glass Effect' at cornerRadius 34 on a 160x160 frame. '- Small' (5584:32505) is a 48x48 pill (100 / 1000). 'Liquid Glass - Clear' is 23. Previous medium=20 / large=24 were wrong.",
+        "_previous": {
+          "medium": 20,
+          "large": 24
+        },
+        "note": "cornerRadius=1000 means full pill/circle. Extracted from component layers."
+      }
+    }
+  },
+  "components": {
+    "navigationBar": {
+      "height": 54,
+      "largeTitleHeight": 125,
+      "largeTitleHeightIpad": 131,
+      "paddingHorizontal": 16,
+      "paddingHorizontalIpad": 10,
+      "paddingBottom": 10,
+      "buttonSize": 44,
+      "_measured": "Toolbars page 507:25993, component set 'Toolbar - Top - iPhone'. Every non-large style (Default, Inline Large, Title 2 Line, Title 2 Line Left) is 402x54 with paddingLeft/Right 16 and paddingBottom 10. 'Style=Large Title' is 402x125. iPad ('Toolbar - Top - iPad') is 820x54 with 10pt side padding; its Large Title is 131. Bar button items are 44x44 pills. Previous: height 44, largeTitleHeight 96.",
+      "_previous": {
+        "height": 44,
+        "largeTitleHeight": 96
+      },
+      "note": "Standard iOS Navigation Bar (top toolbar). iOS 27 raised the compact bar from 44 to 54pt."
+    },
+    "tabBar": {
+      "height": 54,
+      "glassHeight": 62,
+      "totalHeight": 95,
+      "paddingTop": 16,
+      "paddingBottom": 25,
+      "minimizedHeight": 40,
+      "minimizedGlassHeight": 48,
+      "minimizedTotalHeight": 88,
+      "minimizedPaddingBottom": 32,
+      "itemMinWidth": 72,
+      "searchItemWidth": 54,
+      "ipadHeight": 44,
+      "ipadItemHeight": 36,
+      "ipadPadding": 4,
+      "cornerRadius": 9999,
+      "heightWithIndicator": 95,
+      "_measured": "Tab Bars page 507:24689, 'Tab Bar - iPhone'. Non-minimized variants are 402x95 (paddingTop 16, paddingBottom 25); the button row inside is 54pt tall and the Liquid Glass platter behind it ('BG' → Fill + Shadow / Glass Effect, cornerRadius 1000) is 62pt tall and bleeds 4pt past the buttons on each edge. Minimized variants are 402x88 with a 40pt row and a 48x48 circular platter. Base button '_Tab Bar Button - iPhone' is 72x54; the search-role button is 54x54; the selection highlight is a 100-radius pill. iPad: 'Tab Bar - iPad' is 491x44 with 4pt padding and 36pt-tall buttons. Previous height 49 / heightWithIndicator 83 are iOS 26 UIKit numbers and do not appear in this kit.",
+      "_previous": {
+        "height": 49,
+        "heightWithIndicator": 83,
+        "itemMinWidth": 64
+      },
+      "note": "iOS 27 floating Liquid Glass tab bar. Bar content 54pt, glass platter 62pt, 95pt including the safe-area gap the kit bakes in."
+    },
+    "toolbar": {
+      "height": 54,
+      "topHeight": 54,
+      "bottomHeight": 84,
+      "bottomContentHeight": 48,
+      "bottomPaddingHorizontal": 28,
+      "bottomPaddingTop": 4,
+      "bottomPaddingBottom": 32,
+      "ipadBottomHeight": 58,
+      "ipadBottomContentHeight": 44,
+      "paddingHorizontal": 16,
+      "buttonMinWidth": 44,
+      "bottomButtonMinWidth": 48,
+      "_measured": "Toolbars page 507:25993. 'Toolbar - Top - iPhone' = 402x54 (pad 16/16/0/10). 'Toolbar - Bottom - iPhone' = 402x84 for all six types (pad 28/28/4/32) → 48pt of actual bar. 'Toolbar - Bottom - iPad' = 500x58 (pad 10/10/4/10) → 44pt of bar. Top bar button items ('_Buttons - Top') are 44pt tall; bottom bar button items ('_Button - Bottom') are 48pt tall. All button items are pills.",
+      "_previous": {
+        "height": 44
+      },
+      "note": "Top and bottom toolbars are no longer the same height in iOS 27."
+    },
+    "statusBar": {
+      "heightRegular": 54,
+      "heightIpad": 24,
+      "paddingHorizontal": 9,
+      "ipadPaddingHorizontal": 16,
+      "heightLandscape": 0,
+      "_measured": "54pt on iPhone 16 and iPhone 17 class devices with Dynamic Island — the height of the band the OS draws status information into (UIApplication.statusBarFrame).",
+      "_previous": {
+        "heightRegular": 54
+      },
+      "note": "iPhone Dynamic Island status band. For laying out content use the safe area inset, never this value.",
+      "_correction": "An earlier revision set this to 62 after measuring a 62pt band on the kit's 402x874 bezel. That was wrong: 62 is the TOP SAFE AREA INSET on iPhone 17 class hardware, not the status bar height. The status bar is 54pt on both generations; the safe area extends past it to clear the Dynamic Island. Verified against device-metric references on 2026-07-30."
+    },
+    "listRow": {
+      "heightRegular": 52,
+      "heightTall": 68,
+      "heightButtonRow": 52,
+      "heightSmall": 36,
+      "heightLarge": 68,
+      "paddingHorizontal": 16,
+      "separatorInset": 16,
+      "separatorHeight": 1,
+      "sectionHeaderNested": 42,
+      "sectionHeaderProminent": 45,
+      "sectionHeaderExtraProminent": 48,
+      "sectionHeaderPaddingHorizontal": 16,
+      "sectionHeaderPaddingVertical": 10,
+      "footerHeight": 32,
+      "paddingVertical": 11,
+      "_measured": "Lists page 507:24675, component set 'Row'. Only two height variants exist: Height=Regular 300x52 and Height=Tall 300x68, both with paddingLeft/Right 16. The inner 'Contents' frame is 268pt wide with paddingBottom 1 — that 1pt is the hairline separator, so the separator inset equals the 16pt row inset. 'Row - Button' is 52pt. Section 'Header' variants: Nested 42 / Prominent 45 / Extra Prominent 48, all pad 16/16/10/10. 'Grouped Table Footer' 300x32 (pad 16/16/8/6). The old heightSmall 36 / heightRegular 44 / heightLarge 58 have no counterpart in the iOS 27 kit; heightLarge is realigned to the measured Tall row and heightSmall is retained unattested for back-compat.",
+      "_previous": {
+        "heightSmall": 36,
+        "heightRegular": 44,
+        "heightLarge": 58
+      },
+      "note": "iOS 27 list rows. Regular=52pt, Tall=68pt. 44pt remains the HIG minimum tap target but is no longer a row height the kit ships."
+    },
+    "alert": {
+      "width": 300,
+      "padding": 14,
+      "paddingHorizontal": 14,
+      "paddingVertical": 14,
+      "buttonHeight": 48,
+      "buttonCornerRadius": 9999,
+      "buttonGapSideBySide": 8,
+      "buttonGapStacked": 8,
+      "buttonPaddingHorizontal": 16,
+      "buttonPaddingVertical": 13,
+      "titleMessageGap": 10,
+      "titleMessagePaddingHorizontal": 8,
+      "titleMessagePaddingTop": 8,
+      "titleMessagePaddingBottom": 24,
+      "textFieldCornerRadius": 26,
+      "textFieldRowHeight": 52,
+      "cornerRadius": 34,
+      "_measured": "Alerts page 507:24668, component set 'Alert'. Both variants are 300pt wide with 14pt padding on all four sides; 'BG' → Fill + Shadow / Glass Effect are cornerRadius 34. Buttons are 48pt tall pills (pad 16/16/13/13). Per the 27.0.0 change log entry 'Updated spacing between stacked and side-by-side buttons', both layouts now use the SAME 8pt gap — measured itemSpacing 8 on the side-by-side 'Buttons' frame and 8 on the stacked 'Actions' slot. The change log also notes 'Removed extra padding between message, text field, and buttons'; the remaining separation lives in the Title and Message block's 24pt paddingBottom. Previous width 270 / buttonHeight 44 / cornerRadius 14 are all superseded.",
+      "_previous": {
+        "width": 270,
+        "paddingHorizontal": 16,
+        "paddingVertical": 20,
+        "buttonHeight": 44,
+        "cornerRadius": 14
+      }
+    },
+    "sheet": {
+      "grabberWidth": 58,
+      "grabberHeight": 4,
+      "grabberTop": 5,
+      "grabberCornerRadius": 9999,
+      "toolbarHeight": 54,
+      "contentPaddingTop": 16,
+      "mediumHeight": 459,
+      "mediumWidth": 390,
+      "mediumSideInset": 6,
+      "largeTopInset": 62,
+      "largeHeight": 812,
+      "stackedTopInset": 72,
+      "stackedHeight": 802,
+      "stackedBackgroundPageWidth": 370,
+      "ipadToolbarHeight": 70,
+      "variants": [
+        "Medium",
+        "Large",
+        "Large (Stacked)"
+      ],
+      "minDetent": 0.25,
+      "mediumDetent": 0.5,
+      "largeDetent": 1.0,
+      "_measured": "Sheets page 507:24684. Per the 27.0.0 change log, iPhone sheets are now ONE component ('Sheet - iPhone') with three variants: Medium, Large, Large (Stacked). Measured on a 402x874 frame: Medium is a floating 390x459 card inset 6pt per side; Large is edge-to-edge 402x812 pushed down 62pt; Large (Stacked) is 402x802 pushed down 72pt over a 370pt-wide background page. The 'Grabber' component is 58x4 with cornerRadius 100, sitting in a 16pt frame with 5pt top padding — previous 36x5 at 8pt top is wrong on all three numbers. Each sheet embeds the 54pt 'Toolbar - Top - iPhone'. iPad sheet toolbar is 70pt (16 grabber + 44 title/controls + 10 bottom). Measured fractions: medium 459/874 = 0.525, large 812/874 = 0.929 — the minDetent/mediumDetent/largeDetent keys below are UISheetPresentationController API semantics, not kit measurements, and were left alone.",
+      "_previous": {
+        "grabberWidth": 36,
+        "grabberHeight": 5,
+        "grabberTop": 8
+      },
+      "note": "iOS 27 bottom sheet with Liquid Glass. Detents match UISheetPresentationController."
+    },
+    "button": {
+      "heightSmall": 28,
+      "heightMedium": 34,
+      "heightLarge": 50,
+      "paddingHorizontalSmall": 10,
+      "paddingHorizontalMedium": 14,
+      "paddingHorizontalLarge": 20,
+      "paddingVerticalSmall": 4,
+      "paddingVerticalMedium": 7,
+      "paddingVerticalLarge": 14,
+      "glassPaddingHorizontalSmall": 10,
+      "glassPaddingHorizontalMedium": 12,
+      "glassPaddingHorizontalLarge": 20,
+      "glassPaddingVerticalSmall": 5,
+      "glassPaddingVerticalMedium": 8,
+      "glassPaddingVerticalLarge": 16,
+      "iconOnlySmall": 28,
+      "iconOnlyMedium": 34,
+      "iconOnlyLarge": 50,
+      "labelIconGapSmall": 3,
+      "labelIconGapMediumLarge": 4,
+      "_measured": "Buttons page 507:24673. 'Button - Content Area' ships Small 28 / Medium 34 / Large 50pt heights across Borderless, Bordered and Bordered-Prominent, with icon-only variants square at the same sizes. 'Button - Liquid Glass - Text' (Glass, Glass Prominent) uses the same 28/34/50 heights but different padding, and 'Button - Liquid Glass - Symbol' is 50x50. Every bordered/glass variant is a pill. New section — iOS 26 spacing.json had no button sizing block."
+    },
+    "progressIndicator": {
+      "determinateTrackHeight": 4,
+      "determinateTrackCornerRadius": 9999,
+      "determinateLabelGap": 3,
+      "determinatePaddingHorizontal": 16,
+      "spinnerSmall": 14,
+      "spinnerRegular": 20,
+      "spinnerLarge": 35,
+      "spinnerLabelGapSmall": 4,
+      "spinnerLabelGapRegularLarge": 8,
+      "_measured": "Progress Indicators page 507:24682. The 'Track' frame inside 'Progress Bar - Determinate Linear' measures 338x4 with cornerRadius 100 at every Value= variant, confirming the change log entry 'Changed determinate progress indicator height from 6pt to 4pt'. The optional label sits 3pt above the track. 'Progress Bar - Indeterminate Circular (Spinner)' now has three aligned sizes: 14 / 20 / 35pt. New section — iOS 26 spacing.json had no progress block.",
+      "_previous": {
+        "determinateTrackHeight": 6
+      }
+    },
+    "datePicker": {
+      "collapsedHeight": 34,
+      "collapsedCornerRadius": 6,
+      "collapsedDateWidth": 106,
+      "collapsedTimeWidth": 86,
+      "collapsedDateTimeWidth": 198,
+      "collapsedGap": 6,
+      "expandedCornerRadius": 13,
+      "expandedPaddingHorizontal": 12,
+      "calendarDaySize": 38,
+      "calendarDayCornerRadius": 9999,
+      "_measured": "Date and Time Pickers page 507:24680, plus the '_Trailing' picker instances on the Lists page. Collapsed controls are 34pt tall with a 6pt radius (Date 106pt, Time 86pt, Date and Time 198pt combined at 204pt with a 6pt gap) — this is the change log's 'Adjusted height of collapsed date and time picker controls'. Calendar '_Day' cells are 38x38 with a 100-radius selection ring ('Adjusted size of calendar days'). The expanded picker container is 370x377, radius 13, 12pt side padding. New section. CAUTION: the iOS 26 collapsed height was not re-measured here, so the delta direction is unverified — only the iOS 27 value is asserted."
+    },
+    "touchTarget": {
+      "minimum": 44,
+      "_measured": "Kit-attested floor: top-bar button items and iPad sheet toolbar buttons are exactly 44x44. Bottom-toolbar button items are 48x48 and the Large button size is 50pt, so 44 remains the minimum rather than the norm. Unchanged from iOS 26.",
+      "note": "Apple HIG minimum tap target is 44×44pt. WCAG 2.1 SC 2.5.5 Target Size (Enhanced) = 44×44 CSS px is level AAA, not AA. WCAG 2.2 SC 2.5.8 Target Size (Minimum) = 24×24 CSS px is level AA."
+    }
+  },
+  "safeArea": {
+    "_measured": "NOT re-measured — the iOS 27 kit ships device bezels (Product Bezels page 507:24672: iPhone 16 Pro / 17 Pro / 17 = 402x874, iPhone 16 Pro Max = 440x956, iPhone 16 = 393x852) but does not annotate safe-area insets as layer geometry. Values below are carried over from the iOS 26 extraction. Note the tension with components.statusBar.heightRegular = 62 (measured): the kit draws a 62pt status band while UIKit reports a 59pt top inset on the same device.",
+    "iphone16Pro": {
+      "top": 59,
+      "bottom": 34,
+      "note": "Dynamic Island models"
+    },
+    "iphone16": {
+      "top": 59,
+      "bottom": 34,
+      "_source": "checked 2026-07-30"
+    },
+    "iphoneSE": {
+      "top": 20,
+      "bottom": 0,
+      "note": "No Dynamic Island / notch"
+    },
+    "ipadLandscape": {
+      "top": 24,
+      "bottom": 20
+    },
+    "_note": "Top inset differs by generation while the status bar stays 54pt. Constrain content to the safe area, not to the status bar height — the inset reserves extra room around the Dynamic Island.",
+    "iphone17": {
+      "top": 62,
+      "bottom": 34,
+      "note": "Landscape gains a 20pt top inset on this generation.",
+      "_source": "device metric references, checked 2026-07-30"
+    }
+  },
+  "liquidGlass": {
+    "depth": 16,
+    "frost": {
+      "small": 7,
+      "medium": 12,
+      "large": 14
+    },
+    "splay": 6,
+    "refraction": 100,
+    "note": "Extracted from Figma Kit variables. Depth=blur depth, frost=frosted glass blur amount, splay=light spread angle, refraction=lens distortion amount."
+  }
+}

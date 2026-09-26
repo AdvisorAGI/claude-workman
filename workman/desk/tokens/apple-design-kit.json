@@ -1,0 +1,71 @@
+{
+  "kit": {
+    "name": "Apple Design Resources",
+    "latest": {
+      "platform": "macOS 27",
+      "codename": "Golden Gate",
+      "shipped": "2026-06-23",
+      "figmaUpdated": "2026-07-24",
+      "figma": "https://www.figma.com/community/file/1651309434229735362/macos-27",
+      "figmaFileId": "1651309434229735362",
+      "portal": "https://developer.apple.com/design/resources/"
+    },
+    "iosIpad": {
+      "platform": "iOS 27 and iPadOS 27",
+      "kitVersion": "27.0.2",
+      "kitVersionDate": "2026-07-16",
+      "figma": "https://www.figma.com/community/file/1651309003795292092/ios-and-ipados-27",
+      "figmaFileId": "1651309003795292092",
+      "figmaFileKey": "1he05dQDLN4F7TH3bAB3uk",
+      "tokensExtracted": "2026-07-29 via Figma REST API (community measurements, numbers only)"
+    },
+    "alsoCurrent": {
+      "watchOS": "26",
+      "visionOS": "26",
+      "tvOS": "18",
+      "sfSymbols": "27",
+      "sfSymbolsDmg": "https://devimages-cdn.apple.com/design/resources/download/SF-Symbols-27.dmg?2"
+    }
+  },
+  "thisMac": {
+    "macos": "26.6.2",
+    "build": "25G83",
+    "workmanApp": {
+      "path": "~/Applications/Workman.app",
+      "bundleId": "ai.atmosphere.workman",
+      "version": "0.2.0",
+      "lsuiElement": true,
+      "note": "Permission daemon only. No visual chrome, no Design kit."
+    },
+    "workmanDesk": {
+      "window": "Chrome --app Workman Desk",
+      "source": "workman/desk/index.html",
+      "usesAppleKit": false,
+      "currentTokens": {
+        "--bg": "#12141a",
+        "--panel": "#1b1e27",
+        "--ink": "#e8eaef",
+        "--muted": "#8b90a0",
+        "--line": "#2a2e3a",
+        "--accent": "#7eb0ff",
+        "--go": "#3dd68c",
+        "--stop": "#ff6b6b"
+      }
+    },
+    "sfSymbolsApp": null,
+    "figmaApp": null,
+    "sketchApp": null
+  },
+  "files": {
+    "macosAppKit": "macos-appkit.json",
+    "css": "apple-tokens.css",
+    "ios27Kit": "ios27-kit-27.0.2/"
+  },
+  "notes": [
+    "Apple does not publish a JSON token file. The official kits are Figma/Sketch libraries with color styles, text styles, and materials.",
+    "Accent colors on this Mac (AppKit) match iOS/macOS 27 kit 27.0.2 exactly (systemBlue light #0088ff / dark #0091ff, etc.).",
+    "macOS semantic labels differ from iOS: AppKit label is black/white at 0.847 alpha; iOS kit primary label is opaque black/white.",
+    "This machine is still on macOS 26.6.2. The latest kit is macOS 27. Live AppKit values are Tahoe/26.",
+    "SF Symbols 27 is the kit companion; it is not installed on this Mac."
+  ]
+}

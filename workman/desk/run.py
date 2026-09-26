@@ -16,8 +16,13 @@ OnChunk = Callable[[str], None]
 
 class Job:
     def __init__(self) -> None:
-        self.proc: subprocess.Popen[str] | None = None
+        self.proc: subprocess.Popen[bytes] | None = None
         self._lock = threading.Lock()
+
+    def busy(self) -> bool:
+        with self._lock:
+            proc = self.proc
+        return proc is not None and proc.poll() is None
 
     def stop(self) -> None:
         with self._lock:
@@ -44,6 +49,9 @@ class Job:
         cwd: str | None,
         auto_approve: bool,
         on_chunk: OnChunk,
+        *,
+        session_id: str | None = None,
+        resume: bool = False,
     ) -> int:
         prompt = (prompt or "").strip()
         if not prompt:
@@ -54,7 +62,7 @@ class Job:
             on_chunk(f"cwd does not exist: {work}\n")
             return 2
         tmp: str | None = None
-        if vendor_id == "grok" and len(prompt) > 4000:
+        if vendor_id in ("grok", "workman") and len(prompt) > 4000:
             handle = tempfile.NamedTemporaryFile(
                 "w", suffix=".txt", delete=False, encoding="utf-8")
             handle.write(prompt)
@@ -63,11 +71,14 @@ class Job:
         argv = build_argv(
             vendor_id, binary, model, prompt,
             prompt_file=tmp, auto_approve=auto_approve,
+            session_id=session_id, resume=resume,
         )
+        env = launch_env()
+        env["PYTHONUNBUFFERED"] = "1"
         kwargs: dict = dict(
-            args=argv, cwd=str(work), env=launch_env(),
+            args=argv, cwd=str(work), env=env,
             stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
-            text=True, bufsize=1,
+            bufsize=0,
         )
         if os.name != "nt":
             kwargs["start_new_session"] = True
@@ -82,8 +93,11 @@ class Job:
             self.proc = proc
         assert proc.stdout is not None
         try:
-            for line in proc.stdout:
-                on_chunk(line)
+            while True:
+                buf = proc.stdout.read(256)
+                if not buf:
+                    break
+                on_chunk(buf.decode("utf-8", "replace"))
         finally:
             try:
                 proc.stdout.close()
@@ -99,3 +113,28 @@ class Job:
                 except OSError:
                     pass
         return code
+
+
+class Jobs:
+    """One subprocess per key so a board run and a chat can overlap."""
+
+    def __init__(self) -> None:
+        self._lock = threading.Lock()
+        self._jobs: dict[str, Job] = {}
+
+    def get(self, key: str) -> Job:
+        with self._lock:
+            job = self._jobs.get(key)
+            if job is None:
+                job = Job()
+                self._jobs[key] = job
+            return job
+
+    def stop(self, key: str | None = None) -> None:
+        with self._lock:
+            if key:
+                jobs = [self._jobs[key]] if key in self._jobs else []
+            else:
+                jobs = list(self._jobs.values())
+        for job in jobs:
+            job.stop()

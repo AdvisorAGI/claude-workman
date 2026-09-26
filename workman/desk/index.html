@@ -4,64 +4,129 @@
 <meta charset="utf-8">
 <meta name="viewport" content="width=device-width, initial-scale=1">
 <title>Workman Desk</title>
+<link rel="stylesheet" href="/tokens/apple-tokens.css">
 <style>
-  :root { --bg:#12141a; --panel:#1b1e27; --ink:#e8eaef; --muted:#8b90a0; --line:#2a2e3a; --accent:#7eb0ff; --go:#3dd68c; --stop:#ff6b6b; }
+  html, body { margin:0; height:100%; background:var(--bg, #1e1e1e); color:var(--ink, #e8eaef);
+    font: var(--apple-body, 13px)/1.45 var(--apple-font, -apple-system, BlinkMacSystemFont, sans-serif);
+    color-scheme: light dark; }
   * { box-sizing: border-box; }
-  html, body { margin:0; height:100%; background:var(--bg); color:var(--ink); font: 16px/1.4 -apple-system, BlinkMacSystemFont, "Segoe UI", sans-serif; }
   #app { display:grid; grid-template-rows: auto 1fr auto; height:100%; }
-  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center; padding:10px 14px; border-bottom:1px solid var(--line); background:var(--panel); }
-  header h1 { font-size:15px; margin:0 12px 0 0; font-weight:650; letter-spacing:.02em; }
-  label { font-size:12px; color:var(--muted); display:flex; flex-direction:column; gap:3px; }
-  select, input[type=text] { background:#0e1016; color:var(--ink); border:1px solid var(--line); border-radius:8px; padding:6px 8px; min-width:140px; font-size:14px; }
-  #cwd { min-width:220px; }
-  button { border:0; border-radius:8px; padding:8px 12px; font-weight:600; cursor:pointer; }
-  #send { background:var(--go); color:#062; }
-  #stop { background:var(--stop); color:#fff; display:none; }
-  #main { display:grid; grid-template-columns: 1fr 280px; min-height:0; }
-  @media (max-width: 800px) { #main { grid-template-columns: 1fr; } }
-  #log { overflow:auto; padding:16px 18px; white-space:pre-wrap; font-family: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; font-size:14px; }
-  #log .me { color:var(--accent); }
-  #log .sys { color:var(--muted); }
-  aside { border-left:1px solid var(--line); overflow:auto; padding:12px; background:#161821; font-size:13px; }
-  aside h2 { margin:0 0 8px; font-size:12px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
-  .task { margin:0 0 12px; }
-  .task b { display:block; margin-bottom:4px; }
-  .st-working { color:#ffc857; }
-  .st-blocked { color:#ff6b6b; }
-  .st-done { color:#3dd68c; }
-  .st-pending { color:var(--muted); }
+  #main { min-height:0; overflow:hidden; height:100%; }
+  header { display:flex; flex-wrap:wrap; gap:8px; align-items:center;
+    padding:10px 14px; border-bottom:1px solid var(--line, #2a2e3a);
+    background:var(--panel, #323232); }
+  header h1 { font-size:var(--apple-headline, 13px); margin:0 8px 0 0; font-weight:650; }
+  .tabs { display:flex; gap:4px; }
+  .tabs button { background:transparent; color:var(--muted); border:0; border-radius:var(--apple-radius-pill, 999px);
+    padding:6px 12px; font-weight:600; cursor:pointer; }
+  .tabs button.on { background:var(--apple-fill, rgba(255,255,255,.1)); color:var(--ink); }
+  label { font-size:var(--apple-caption, 11px); color:var(--muted); display:flex; flex-direction:column; gap:3px; }
+  select, input[type=text] { background:var(--apple-text-bg, #1e1e1e); color:var(--ink);
+    border:1px solid var(--line); border-radius:8px; padding:6px 8px; min-width:120px; font-size:13px; }
+  #cwd { min-width:200px; }
+  button { border:0; border-radius:8px; padding:8px 12px; font-weight:600; cursor:pointer; color:var(--ink);
+    background:var(--apple-fill); }
+  button:disabled { opacity:.45; cursor:default; }
+  #send { background:var(--go, #30d158); color:#062; }
+  #stop { background:var(--stop, #ff4245); color:#fff; display:none; }
+  #banner { display:none; padding:8px 14px; background:#e2445c; color:#fff; font-size:13px; }
+  #banner.on { display:block; }
+  #view-chat { display:grid; grid-template-columns: 220px 1fr; height:100%; min-height:0; }
+  #view-board { display:none; height:100%; min-height:0; overflow:auto; padding:12px; }
+  body[data-tab=board] #view-chat { display:none; }
+  body[data-tab=board] #view-board { display:block; }
+  #chats { border-right:1px solid var(--line); overflow:auto; background:var(--panel); padding:8px; }
+  #chats h2, .col h2 { margin:0 8px 8px; font-size:11px; color:var(--muted); text-transform:uppercase; letter-spacing:.08em; }
+  .chat-row, .card { display:block; width:100%; text-align:left; background:transparent; border-radius:10px;
+    padding:8px; margin:0 0 6px; color:inherit; }
+  .chat-row:hover, .card:hover { background:var(--apple-fill); }
+  .chat-row.on { background:var(--apple-fill); }
+  .chat-row small, .card small { display:block; color:var(--muted); font-weight:400; white-space:nowrap;
+    overflow:hidden; text-overflow:ellipsis; }
+  #log { overflow:auto; padding:16px 18px; }
+  .msg { max-width:720px; margin:0 0 12px; }
+  .msg .who { font-size:11px; color:var(--muted); margin-bottom:4px; }
+  .msg .body { white-space:pre-wrap; word-break:break-word; padding:10px 12px; border-radius:12px;
+    background:var(--apple-fill); }
+  .msg.me { margin-left:auto; }
+  .msg.me .body { background:rgba(0,136,255,.18); }
+  .msg.sys .body { background:transparent; color:var(--muted); padding:0; }
+  .msg.err .body { background:rgba(255,66,69,.15); color:var(--stop); }
   footer { border-top:1px solid var(--line); padding:10px 14px; background:var(--panel); }
-  textarea { width:100%; min-height:72px; max-height:200px; resize:vertical; background:#0e1016; color:var(--ink); border:1px solid var(--line); border-radius:10px; padding:10px 12px; font: 16px/1.4 ui-monospace, SFMono-Regular, Menlo, Consolas, monospace; }
+  textarea { width:100%; min-height:64px; max-height:200px; resize:vertical;
+    background:var(--apple-text-bg); color:var(--ink); border:1px solid var(--line);
+    border-radius:12px; padding:10px 12px; font: 14px/1.4 var(--apple-mono, ui-monospace, Menlo, monospace); }
   .row { display:flex; gap:8px; align-items:flex-end; margin-top:8px; }
   .hint { color:var(--muted); font-size:12px; margin-left:auto; }
+  .board { display:grid; grid-template-columns: repeat(4, minmax(180px, 1fr)); gap:10px; min-height:100%; }
+  .col { background:var(--panel); border-radius:12px; padding:10px; min-height:320px;
+    border-top:3px solid var(--g, #c4c4c4); }
+  .card { background:var(--bg); border:1px solid var(--line); }
+  .card .meta { display:flex; gap:6px; align-items:center; margin-top:6px; }
+  .card select { min-width:0; flex:1; }
+  .go { background:var(--go); color:#062; padding:4px 8px; font-size:12px; }
+  .ghost { background:transparent; color:var(--muted); padding:4px 6px; font-size:12px; }
+  .add { width:100%; margin-top:8px; background:transparent; border:1px dashed var(--line); color:var(--muted); }
+  #item-pop { display:none; position:fixed; inset:0; background:rgba(0,0,0,.45); z-index:20;
+    align-items:center; justify-content:center; }
+  #item-pop.on { display:flex; }
+  #item-pop .sheet { width:min(520px, 92vw); background:var(--panel); border-radius:16px; padding:16px; }
+  #item-pop textarea { min-height:100px; }
 </style>
 </head>
-<body>
+<body data-tab="chat">
+<div id="banner">Desk server is down. Run <b>workman-desk</b> in a terminal, then this window reconnects.</div>
 <div id="app">
   <header>
     <h1>Workman Desk</h1>
-    <label>Vendor <select id="vendor"></select></label>
+    <div class="tabs">
+      <button type="button" id="tab-chat" class="on">Chat</button>
+      <button type="button" id="tab-board">Board</button>
+    </div>
+    <label>Agent <select id="vendor"></select></label>
     <label>Model <select id="model"></select></label>
     <label>Folder <input id="cwd" type="text" spellcheck="false"></label>
-    <label style="flex-direction:row; align-items:center; gap:6px; margin-top:18px;">
+    <label style="flex-direction:row; align-items:center; gap:6px; margin-top:16px;">
       <input id="approve" type="checkbox"> Allow tools
     </label>
   </header>
   <div id="main">
-    <div id="log"></div>
-    <aside>
-      <h2>Tasks</h2>
-      <div id="tasks">No session tasks.</div>
-    </aside>
+    <div id="view-chat">
+      <aside id="chats">
+        <h2>Chats</h2>
+        <button type="button" id="new-chat" class="add">New chat</button>
+        <div id="chat-list"></div>
+      </aside>
+      <div id="log"></div>
+    </div>
+    <div id="view-board">
+      <div class="board" id="board"></div>
+    </div>
   </div>
-  <footer>
-    <textarea id="prompt" placeholder="Type like the CLI. Enter sends, Shift+Enter newline."></textarea>
+  <footer id="composer">
+    <textarea id="prompt" placeholder="Message the assigned agent. Enter sends, Shift+Enter newline."></textarea>
     <div class="row">
       <button id="send" type="button">Send</button>
       <button id="stop" type="button">Stop</button>
-      <span class="hint" id="hint">Logged-in CLI seats only. No API keys.</span>
+      <span class="hint" id="hint">Logged-in CLI seats. No API keys.</span>
     </div>
   </footer>
+</div>
+<div id="item-pop">
+  <div class="sheet">
+    <h2 style="margin:0 0 10px; font-size:15px;">Work item</h2>
+    <label>Title <input id="it-title" type="text"></label>
+    <label style="margin-top:8px;">Brief for the agent
+      <textarea id="it-brief" placeholder="What should the agent do?"></textarea>
+    </label>
+    <label style="margin-top:8px;">Folder <input id="it-cwd" type="text"></label>
+    <div class="row">
+      <button type="button" id="it-save">Save</button>
+      <button type="button" id="it-run" class="go">Assign & run</button>
+      <button type="button" id="it-del" class="ghost">Delete</button>
+      <button type="button" id="it-close" class="ghost">Close</button>
+    </div>
+  </div>
 </div>
 <script>
 const vendorEl = document.getElementById("vendor");
@@ -69,20 +134,43 @@ const modelEl = document.getElementById("model");
 const cwdEl = document.getElementById("cwd");
 const promptEl = document.getElementById("prompt");
 const logEl = document.getElementById("log");
-const tasksEl = document.getElementById("tasks");
 const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 const approveEl = document.getElementById("approve");
+const banner = document.getElementById("banner");
+const hint = document.getElementById("hint");
+const chatList = document.getElementById("chat-list");
+const boardEl = document.getElementById("board");
+const pop = document.getElementById("item-pop");
+
 let seats = [];
+let chats = [];
+let board = { groups: [], items: [] };
+let chatId = "";
 let running = false;
 let abortCtl = null;
+let live = false;
+let editing = null;
+
+function showBanner(on) {
+  banner.className = on ? "on" : "";
+  live = !on;
+  hint.textContent = on ? "Server offline" : "Logged-in CLI seats. No API keys.";
+}
+
+function el(tag, cls, text) {
+  const n = document.createElement(tag);
+  if (cls) n.className = cls;
+  if (text != null) n.textContent = text;
+  return n;
+}
 
 function add(cls, text) {
-  const d = document.createElement("div");
-  if (cls) d.className = cls;
-  d.textContent = text;
-  logEl.appendChild(d);
+  const wrap = el("div", "msg " + (cls || "sys"));
+  wrap.appendChild(el("div", "body", text));
+  logEl.appendChild(wrap);
   logEl.scrollTop = logEl.scrollHeight;
+  return wrap;
 }
 
 function fillModels() {
@@ -96,60 +184,225 @@ function fillModels() {
   });
 }
 
-function renderTasks(rows) {
-  if (!rows || !rows.length) { tasksEl.textContent = "No session tasks."; return; }
-  tasksEl.innerHTML = "";
-  rows.forEach(s => {
-    const wrap = document.createElement("div");
-    wrap.className = "task";
-    const title = document.createElement("b");
-    title.textContent = s.task || s.id;
-    wrap.appendChild(title);
-    (s.items || []).forEach(it => {
-      const line = document.createElement("div");
-      line.className = "st-" + (it.state || "pending");
-      line.textContent = (it.state || "") + " · " + (it.text || "");
-      wrap.appendChild(line);
-      if (it.state === "blocked" && it.ask) {
-        const ask = document.createElement("div");
-        ask.className = "st-blocked";
-        ask.textContent = "needs you: " + it.ask;
-        wrap.appendChild(ask);
-      }
-    });
-    tasksEl.appendChild(wrap);
+function renderChats() {
+  chatList.innerHTML = "";
+  chats.forEach(c => {
+    const b = el("button", "chat-row" + (c.id === chatId ? " on" : ""));
+    b.type = "button";
+    b.appendChild(el("b", "", c.title || "Chat"));
+    b.appendChild(el("small", "", (c.vendor || "") + (c.last ? " · " + c.last : "")));
+    b.onclick = () => openChat(c.id);
+    chatList.appendChild(b);
   });
 }
 
-async function boot() {
-  const r = await fetch("/api/status");
-  const s = await r.json();
-  seats = s.vendors || [];
-  cwdEl.value = s.cwd || "";
-  vendorEl.innerHTML = "";
-  if (!seats.length) {
-    add("sys", "No CLI seats found (grok, claude, codex, cursor-agent). Install one and log in.");
+function paintMessages(messages) {
+  logEl.innerHTML = "";
+  if (!messages || !messages.length) {
+    add("sys", "Ready. This types into the selected agent on this machine.");
     return;
   }
-  seats.forEach(v => {
-    const o = document.createElement("option");
-    o.value = v.id; o.textContent = v.label + "  " + v.binary;
-    vendorEl.appendChild(o);
+  messages.forEach(m => {
+    const role = m.role === "user" ? "me" : (m.role === "assistant" ? "bot" : "sys");
+    const wrap = el("div", "msg " + role);
+    wrap.appendChild(el("div", "who", role === "me" ? "you" : (m.vendor || vendorEl.value || "agent")));
+    wrap.appendChild(el("div", "body", m.text || ""));
+    logEl.appendChild(wrap);
   });
-  vendorEl.onchange = fillModels;
-  fillModels();
-  renderTasks(s.tasks);
-  add("sys", "Ready. This types into the selected CLI on this machine.");
+  logEl.scrollTop = logEl.scrollHeight;
+}
+
+async function openChat(id) {
+  chatId = id;
+  renderChats();
+  try {
+    const r = await fetch("/api/chat?id=" + encodeURIComponent(id));
+    const s = await r.json();
+    if (!s.ok) return;
+    const c = s.chat;
+    if (c.vendor) vendorEl.value = c.vendor;
+    fillModels();
+    if (c.model) modelEl.value = c.model;
+    if (c.cwd) cwdEl.value = c.cwd;
+    paintMessages(c.messages);
+  } catch (e) {
+    showBanner(true);
+  }
+}
+
+async function newChat() {
+  const r = await fetch("/api/chats", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify({
+      vendor: vendorEl.value, model: modelEl.value, cwd: cwdEl.value
+    })
+  });
+  const s = await r.json();
+  chatId = s.chat.id;
+  await refresh();
+  paintMessages([]);
+}
+
+function renderBoard() {
+  boardEl.innerHTML = "";
+  (board.groups || []).forEach(g => {
+    const col = el("div", "col");
+    col.style.setProperty("--g", g.color || "#c4c4c4");
+    col.dataset.group = g.id;
+    col.appendChild(el("h2", "", g.title));
+    col.ondragover = e => { e.preventDefault(); };
+    col.ondrop = e => {
+      e.preventDefault();
+      const id = e.dataTransfer.getData("text/plain");
+      if (id) saveItem({ id, group: g.id });
+    };
+    (board.items || []).filter(i => i.group === g.id).forEach(item => {
+      const card = el("div", "card");
+      card.draggable = true;
+      card.ondragstart = e => e.dataTransfer.setData("text/plain", item.id);
+      card.appendChild(el("b", "", item.title || "Untitled"));
+      if (item.brief) card.appendChild(el("small", "", item.brief));
+      const meta = el("div", "meta");
+      const sel = document.createElement("select");
+      sel.appendChild(new Option("Unassigned", ""));
+      seats.forEach(s => sel.appendChild(new Option(s.label, s.id)));
+      sel.value = item.assignee || "";
+      sel.onchange = () => saveItem({ id: item.id, assignee: sel.value });
+      meta.appendChild(sel);
+      const run = el("button", "go", "Run");
+      run.type = "button";
+      run.onclick = ev => { ev.stopPropagation(); runItem(item.id); };
+      meta.appendChild(run);
+      card.appendChild(meta);
+      card.onclick = () => editItem(item);
+      col.appendChild(card);
+    });
+    const addBtn = el("button", "add", "+ Add");
+    addBtn.type = "button";
+    addBtn.onclick = () => editItem({ id: "", group: g.id, title: "", brief: "", assignee: vendorEl.value, cwd: cwdEl.value });
+    col.appendChild(addBtn);
+    boardEl.appendChild(col);
+  });
+}
+
+function editItem(item) {
+  editing = item;
+  document.getElementById("it-title").value = item.title || "";
+  document.getElementById("it-brief").value = item.brief || "";
+  document.getElementById("it-cwd").value = item.cwd || cwdEl.value;
+  pop.className = "on";
+}
+
+async function saveItem(fields) {
+  const r = await fetch("/api/board/item", {
+    method: "POST",
+    headers: {"Content-Type": "application/json"},
+    body: JSON.stringify(fields)
+  });
+  const s = await r.json();
+  if (s.board) { board = s.board; renderBoard(); }
+  return s;
+}
+
+async function runItem(id) {
+  document.body.dataset.tab = "chat";
+  syncTabs();
+  running = true;
+  sendBtn.style.display = "none";
+  stopBtn.style.display = "inline-block";
+  add("sys", "Running assigned agent…");
+  const node = add("bot", "");
+  const body = node.querySelector(".body");
+  abortCtl = new AbortController();
+  try {
+    const res = await fetch("/api/board/run", {
+      method: "POST",
+      headers: {"Content-Type": "application/json"},
+      signal: abortCtl.signal,
+      body: JSON.stringify({ id, auto_approve: approveEl.checked, cwd: cwdEl.value })
+    });
+    const cid = res.headers.get("X-Chat-Id");
+    if (cid) chatId = cid;
+    await readStream(res, body);
+  } catch (err) {
+    if (err.name !== "AbortError") {
+      showBanner(true);
+      add("err", String(err));
+    }
+  }
+  running = false;
+  sendBtn.style.display = "inline-block";
+  stopBtn.style.display = "none";
+  refresh();
+}
+
+async function readStream(res, node) {
+  if (!res.ok || !res.body) {
+    const t = await res.text();
+    node.textContent = t || ("HTTP " + res.status);
+    node.parentElement.className = "msg err";
+    return;
+  }
+  const reader = res.body.getReader();
+  const dec = new TextDecoder();
+  let buf = "";
+  while (true) {
+    const {value, done} = await reader.read();
+    if (done) break;
+    buf += dec.decode(value, {stream: true});
+    node.textContent = buf;
+    logEl.scrollTop = logEl.scrollHeight;
+  }
+}
+
+function syncTabs() {
+  const boardOn = document.body.dataset.tab === "board";
+  document.getElementById("tab-chat").className = boardOn ? "" : "on";
+  document.getElementById("tab-board").className = boardOn ? "on" : "";
+  document.getElementById("composer").style.display = boardOn ? "none" : "block";
+}
+
+async function refresh() {
+  try {
+    const r = await fetch("/api/status");
+    const s = await r.json();
+    showBanner(!s.ok);
+    seats = s.vendors || [];
+    chats = s.chats || [];
+    board = s.board || board;
+    if (!vendorEl.options.length && seats.length) {
+      vendorEl.innerHTML = "";
+      seats.forEach(v => {
+        const o = document.createElement("option");
+        o.value = v.id; o.textContent = v.label;
+        vendorEl.appendChild(o);
+      });
+      vendorEl.onchange = fillModels;
+      fillModels();
+      cwdEl.value = cwdEl.value || s.cwd || "";
+    }
+    renderChats();
+    renderBoard();
+    if (!chatId && chats[0]) chatId = chats[0].id;
+    return s;
+  } catch (_) {
+    showBanner(true);
+    return null;
+  }
 }
 
 async function send() {
   const prompt = promptEl.value.trim();
   if (!prompt || running) return;
+  if (!vendorEl.value) { add("err", "No CLI seat found."); return; }
   running = true;
   sendBtn.style.display = "none";
   stopBtn.style.display = "inline-block";
-  add("me", "you · " + vendorEl.value + " / " + modelEl.value + "\n" + prompt);
+  add("me", prompt);
   promptEl.value = "";
+  const node = add("bot", "");
+  const body = node.querySelector(".body");
   abortCtl = new AbortController();
   try {
     const res = await fetch("/api/run", {
@@ -157,6 +410,7 @@ async function send() {
       headers: {"Content-Type": "application/json"},
       signal: abortCtl.signal,
       body: JSON.stringify({
+        chat_id: chatId,
         vendor: vendorEl.value,
         model: modelEl.value,
         prompt,
@@ -164,38 +418,72 @@ async function send() {
         auto_approve: approveEl.checked
       })
     });
-    const reader = res.body.getReader();
-    const dec = new TextDecoder();
-    let buf = "";
-    const node = document.createElement("div");
-    logEl.appendChild(node);
-    while (true) {
-      const {value, done} = await reader.read();
-      if (done) break;
-      buf += dec.decode(value, {stream: true});
-      node.textContent = buf;
-      logEl.scrollTop = logEl.scrollHeight;
-    }
+    const cid = res.headers.get("X-Chat-Id");
+    if (cid) chatId = cid;
+    await readStream(res, body);
+    showBanner(false);
   } catch (err) {
-    if (err.name !== "AbortError") add("sys", String(err));
+    if (err.name !== "AbortError") {
+      showBanner(true);
+      body.textContent = String(err);
+      node.className = "msg err";
+    }
   }
   running = false;
   sendBtn.style.display = "inline-block";
   stopBtn.style.display = "none";
+  refresh();
 }
 
+document.getElementById("tab-chat").onclick = () => { document.body.dataset.tab = "chat"; syncTabs(); };
+document.getElementById("tab-board").onclick = () => { document.body.dataset.tab = "board"; syncTabs(); };
+document.getElementById("new-chat").onclick = () => newChat();
 sendBtn.onclick = send;
-stopBtn.onclick = () => { fetch("/api/stop", {method:"POST"}); if (abortCtl) abortCtl.abort(); };
+stopBtn.onclick = () => {
+  fetch("/api/stop", {method:"POST", headers:{"Content-Type":"application/json"},
+    body: JSON.stringify({chat_id: chatId})});
+  if (abortCtl) abortCtl.abort();
+};
 promptEl.addEventListener("keydown", e => {
   if (e.key === "Enter" && !e.shiftKey) { e.preventDefault(); send(); }
 });
-boot();
-setInterval(async () => {
-  try {
-    const s = await (await fetch("/api/status")).json();
-    renderTasks(s.tasks);
-  } catch (_) {}
-}, 4000);
+document.getElementById("it-close").onclick = () => { pop.className = ""; };
+document.getElementById("it-save").onclick = async () => {
+  const item = editing || {};
+  await saveItem({
+    id: item.id || "",
+    group: item.group || "backlog",
+    title: document.getElementById("it-title").value,
+    brief: document.getElementById("it-brief").value,
+    cwd: document.getElementById("it-cwd").value,
+    assignee: item.assignee || vendorEl.value
+  });
+  pop.className = "";
+};
+document.getElementById("it-run").onclick = async () => {
+  const title = document.getElementById("it-title").value;
+  const s = await saveItem({
+    id: (editing && editing.id) || "",
+    group: (editing && editing.group) || "working",
+    title,
+    brief: document.getElementById("it-brief").value,
+    cwd: document.getElementById("it-cwd").value,
+    assignee: vendorEl.value
+  });
+  pop.className = "";
+  if (s.item) runItem(s.item.id);
+};
+document.getElementById("it-del").onclick = async () => {
+  if (!editing || !editing.id) { pop.className = ""; return; }
+  await saveItem({ id: editing.id, delete: true });
+  pop.className = "";
+};
+
+refresh().then(s => {
+  if (s && !(s.vendors || []).length) add("err", "No CLI seats found (grok, claude, codex, cursor-agent).");
+  else if (s) add("sys", "Ready. This types into the selected agent on this machine.");
+});
+setInterval(refresh, 4000);
 </script>
 </body>
 </html>

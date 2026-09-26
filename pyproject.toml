@@ -60,5 +60,5 @@ packages = ["workman", "workman.platform", "workman.desk", "workman.studio"]
 [tool.setuptools.package-data]
 # Non-Python files the code opens next to itself: the Desk page and the Studio's
 # Atmosmotion render script (node), both read via Path(__file__).
-"workman.desk" = ["index.html"]
+"workman.desk" = ["index.html", "tokens/*.css", "tokens/*.json", "tokens/*/*.json"]
 "workman.studio" = ["atmos_render.mjs"]

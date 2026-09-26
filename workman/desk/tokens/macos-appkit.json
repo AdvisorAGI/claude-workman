@@ -1,0 +1,540 @@
+{
+  "source": "Live AppKit NSColor on this Mac. Semantic names match Apple HIG / the macOS UI kit color styles.",
+  "macos": {
+    "ProductName": "macOS",
+    "ProductVersion": "26.6.2",
+    "BuildVersion": "25G83"
+  },
+  "measured": "2026-09-19",
+  "colorSpace": "sRGB approximation of system colors (platform is Display P3).",
+  "modes": {
+    "light": {
+      "label": {
+        "hex": "#000000",
+        "alpha": 0.8471,
+        "css": "rgba(0,0,0,0.8471)"
+      },
+      "secondaryLabel": {
+        "hex": "#000000",
+        "alpha": 0.498,
+        "css": "rgba(0,0,0,0.498)"
+      },
+      "tertiaryLabel": {
+        "hex": "#000000",
+        "alpha": 0.2588,
+        "css": "rgba(0,0,0,0.2588)"
+      },
+      "quaternaryLabel": {
+        "hex": "#000000",
+        "alpha": 0.098,
+        "css": "rgba(0,0,0,0.098)"
+      },
+      "text": {
+        "hex": "#000000",
+        "alpha": 1.0,
+        "css": "#000000"
+      },
+      "placeholderText": {
+        "hex": "#000000",
+        "alpha": 0.2471,
+        "css": "rgba(0,0,0,0.2471)"
+      },
+      "selectedText": {
+        "hex": "#000000",
+        "alpha": 1.0,
+        "css": "#000000"
+      },
+      "selectedTextBackground": {
+        "hex": "#b3d7ff",
+        "alpha": 1.0,
+        "css": "#b3d7ff"
+      },
+      "unemphasizedSelectedText": {
+        "hex": "#000000",
+        "alpha": 1.0,
+        "css": "#000000"
+      },
+      "unemphasizedSelectedTextBackground": {
+        "hex": "#dcdcdc",
+        "alpha": 1.0,
+        "css": "#dcdcdc"
+      },
+      "keyboardFocusIndicator": {
+        "hex": "#0067f4",
+        "alpha": 0.498,
+        "css": "rgba(0,103,244,0.498)"
+      },
+      "link": {
+        "hex": "#0068da",
+        "alpha": 1.0,
+        "css": "#0068da"
+      },
+      "separator": {
+        "hex": "#000000",
+        "alpha": 0.098,
+        "css": "rgba(0,0,0,0.098)"
+      },
+      "selectedContentBackground": {
+        "hex": "#0064e1",
+        "alpha": 1.0,
+        "css": "#0064e1"
+      },
+      "unemphasizedSelectedContentBackground": {
+        "hex": "#dcdcdc",
+        "alpha": 1.0,
+        "css": "#dcdcdc"
+      },
+      "selectedMenuItemText": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "grid": {
+        "hex": "#e6e6e6",
+        "alpha": 1.0,
+        "css": "#e6e6e6"
+      },
+      "headerText": {
+        "hex": "#000000",
+        "alpha": 0.8471,
+        "css": "rgba(0,0,0,0.8471)"
+      },
+      "controlAccent": {
+        "hex": "#007aff",
+        "alpha": 1.0,
+        "css": "#007aff"
+      },
+      "control": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "controlBackground": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "controlText": {
+        "hex": "#000000",
+        "alpha": 0.8471,
+        "css": "rgba(0,0,0,0.8471)"
+      },
+      "disabledControlText": {
+        "hex": "#000000",
+        "alpha": 0.2471,
+        "css": "rgba(0,0,0,0.2471)"
+      },
+      "selectedControl": {
+        "hex": "#b3d7ff",
+        "alpha": 1.0,
+        "css": "#b3d7ff"
+      },
+      "selectedControlText": {
+        "hex": "#000000",
+        "alpha": 0.8471,
+        "css": "rgba(0,0,0,0.8471)"
+      },
+      "alternateSelectedControlText": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "windowBackground": {
+        "hex": "#ececec",
+        "alpha": 1.0,
+        "css": "#ececec"
+      },
+      "windowFrameText": {
+        "hex": "#000000",
+        "alpha": 0.8471,
+        "css": "rgba(0,0,0,0.8471)"
+      },
+      "underPageBackground": {
+        "hex": "#969696",
+        "alpha": 0.898,
+        "css": "rgba(150,150,150,0.898)"
+      },
+      "findHighlight": {
+        "hex": "#ffff00",
+        "alpha": 1.0,
+        "css": "#ffff00"
+      },
+      "highlight": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "shadow": {
+        "hex": "#000000",
+        "alpha": 1.0,
+        "css": "#000000"
+      },
+      "textBackground": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "systemBlue": {
+        "hex": "#0088ff",
+        "alpha": 1.0,
+        "css": "#0088ff"
+      },
+      "systemBrown": {
+        "hex": "#ac7f5e",
+        "alpha": 1.0,
+        "css": "#ac7f5e"
+      },
+      "systemCyan": {
+        "hex": "#00c0e8",
+        "alpha": 1.0,
+        "css": "#00c0e8"
+      },
+      "systemGray": {
+        "hex": "#8e8e93",
+        "alpha": 1.0,
+        "css": "#8e8e93"
+      },
+      "systemGreen": {
+        "hex": "#34c759",
+        "alpha": 1.0,
+        "css": "#34c759"
+      },
+      "systemIndigo": {
+        "hex": "#6155f5",
+        "alpha": 1.0,
+        "css": "#6155f5"
+      },
+      "systemMint": {
+        "hex": "#00c8b3",
+        "alpha": 1.0,
+        "css": "#00c8b3"
+      },
+      "systemOrange": {
+        "hex": "#ff8d28",
+        "alpha": 1.0,
+        "css": "#ff8d28"
+      },
+      "systemPink": {
+        "hex": "#ff2d55",
+        "alpha": 1.0,
+        "css": "#ff2d55"
+      },
+      "systemPurple": {
+        "hex": "#cb30e0",
+        "alpha": 1.0,
+        "css": "#cb30e0"
+      },
+      "systemRed": {
+        "hex": "#ff383c",
+        "alpha": 1.0,
+        "css": "#ff383c"
+      },
+      "systemTeal": {
+        "hex": "#00c3d0",
+        "alpha": 1.0,
+        "css": "#00c3d0"
+      },
+      "systemYellow": {
+        "hex": "#ffcc00",
+        "alpha": 1.0,
+        "css": "#ffcc00"
+      },
+      "systemFill": {
+        "hex": "#000000",
+        "alpha": 0.098,
+        "css": "rgba(0,0,0,0.098)"
+      },
+      "secondarySystemFill": {
+        "hex": "#000000",
+        "alpha": 0.0784,
+        "css": "rgba(0,0,0,0.0784)"
+      },
+      "tertiarySystemFill": {
+        "hex": "#000000",
+        "alpha": 0.0471,
+        "css": "rgba(0,0,0,0.0471)"
+      },
+      "quaternarySystemFill": {
+        "hex": "#000000",
+        "alpha": 0.0275,
+        "css": "rgba(0,0,0,0.0275)"
+      },
+      "alternatingContentBackground": [
+        {
+          "hex": "#ffffff",
+          "alpha": 1.0,
+          "css": "#ffffff"
+        },
+        {
+          "hex": "#f4f5f5",
+          "alpha": 1.0,
+          "css": "#f4f5f5"
+        }
+      ]
+    },
+    "dark": {
+      "label": {
+        "hex": "#ffffff",
+        "alpha": 0.8471,
+        "css": "rgba(255,255,255,0.8471)"
+      },
+      "secondaryLabel": {
+        "hex": "#ffffff",
+        "alpha": 0.549,
+        "css": "rgba(255,255,255,0.549)"
+      },
+      "tertiaryLabel": {
+        "hex": "#ffffff",
+        "alpha": 0.2471,
+        "css": "rgba(255,255,255,0.2471)"
+      },
+      "quaternaryLabel": {
+        "hex": "#ffffff",
+        "alpha": 0.098,
+        "css": "rgba(255,255,255,0.098)"
+      },
+      "text": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "placeholderText": {
+        "hex": "#ffffff",
+        "alpha": 0.2471,
+        "css": "rgba(255,255,255,0.2471)"
+      },
+      "selectedText": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "selectedTextBackground": {
+        "hex": "#3f638b",
+        "alpha": 1.0,
+        "css": "#3f638b"
+      },
+      "unemphasizedSelectedText": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "unemphasizedSelectedTextBackground": {
+        "hex": "#464646",
+        "alpha": 1.0,
+        "css": "#464646"
+      },
+      "keyboardFocusIndicator": {
+        "hex": "#1aa9ff",
+        "alpha": 0.498,
+        "css": "rgba(26,169,255,0.498)"
+      },
+      "link": {
+        "hex": "#419cff",
+        "alpha": 1.0,
+        "css": "#419cff"
+      },
+      "separator": {
+        "hex": "#ffffff",
+        "alpha": 0.098,
+        "css": "rgba(255,255,255,0.098)"
+      },
+      "selectedContentBackground": {
+        "hex": "#0059d1",
+        "alpha": 1.0,
+        "css": "#0059d1"
+      },
+      "unemphasizedSelectedContentBackground": {
+        "hex": "#464646",
+        "alpha": 1.0,
+        "css": "#464646"
+      },
+      "selectedMenuItemText": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "grid": {
+        "hex": "#1a1a1a",
+        "alpha": 1.0,
+        "css": "#1a1a1a"
+      },
+      "headerText": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "controlAccent": {
+        "hex": "#007aff",
+        "alpha": 1.0,
+        "css": "#007aff"
+      },
+      "control": {
+        "hex": "#ffffff",
+        "alpha": 0.2471,
+        "css": "rgba(255,255,255,0.2471)"
+      },
+      "controlBackground": {
+        "hex": "#1e1e1e",
+        "alpha": 1.0,
+        "css": "#1e1e1e"
+      },
+      "controlText": {
+        "hex": "#ffffff",
+        "alpha": 0.8471,
+        "css": "rgba(255,255,255,0.8471)"
+      },
+      "disabledControlText": {
+        "hex": "#ffffff",
+        "alpha": 0.2471,
+        "css": "rgba(255,255,255,0.2471)"
+      },
+      "selectedControl": {
+        "hex": "#3f638b",
+        "alpha": 1.0,
+        "css": "#3f638b"
+      },
+      "selectedControlText": {
+        "hex": "#ffffff",
+        "alpha": 0.8471,
+        "css": "rgba(255,255,255,0.8471)"
+      },
+      "alternateSelectedControlText": {
+        "hex": "#ffffff",
+        "alpha": 1.0,
+        "css": "#ffffff"
+      },
+      "windowBackground": {
+        "hex": "#323232",
+        "alpha": 1.0,
+        "css": "#323232"
+      },
+      "windowFrameText": {
+        "hex": "#ffffff",
+        "alpha": 0.8471,
+        "css": "rgba(255,255,255,0.8471)"
+      },
+      "underPageBackground": {
+        "hex": "#282828",
+        "alpha": 1.0,
+        "css": "#282828"
+      },
+      "findHighlight": {
+        "hex": "#ffff00",
+        "alpha": 1.0,
+        "css": "#ffff00"
+      },
+      "highlight": {
+        "hex": "#b4b4b4",
+        "alpha": 1.0,
+        "css": "#b4b4b4"
+      },
+      "shadow": {
+        "hex": "#000000",
+        "alpha": 1.0,
+        "css": "#000000"
+      },
+      "textBackground": {
+        "hex": "#1e1e1e",
+        "alpha": 1.0,
+        "css": "#1e1e1e"
+      },
+      "systemBlue": {
+        "hex": "#0091ff",
+        "alpha": 1.0,
+        "css": "#0091ff"
+      },
+      "systemBrown": {
+        "hex": "#b78a66",
+        "alpha": 1.0,
+        "css": "#b78a66"
+      },
+      "systemCyan": {
+        "hex": "#3cd3fe",
+        "alpha": 1.0,
+        "css": "#3cd3fe"
+      },
+      "systemGray": {
+        "hex": "#98989d",
+        "alpha": 1.0,
+        "css": "#98989d"
+      },
+      "systemGreen": {
+        "hex": "#30d158",
+        "alpha": 1.0,
+        "css": "#30d158"
+      },
+      "systemIndigo": {
+        "hex": "#6d7cff",
+        "alpha": 1.0,
+        "css": "#6d7cff"
+      },
+      "systemMint": {
+        "hex": "#00dac3",
+        "alpha": 1.0,
+        "css": "#00dac3"
+      },
+      "systemOrange": {
+        "hex": "#ff9230",
+        "alpha": 1.0,
+        "css": "#ff9230"
+      },
+      "systemPink": {
+        "hex": "#ff375f",
+        "alpha": 1.0,
+        "css": "#ff375f"
+      },
+      "systemPurple": {
+        "hex": "#db34f2",
+        "alpha": 1.0,
+        "css": "#db34f2"
+      },
+      "systemRed": {
+        "hex": "#ff4245",
+        "alpha": 1.0,
+        "css": "#ff4245"
+      },
+      "systemTeal": {
+        "hex": "#00d2e0",
+        "alpha": 1.0,
+        "css": "#00d2e0"
+      },
+      "systemYellow": {
+        "hex": "#ffd600",
+        "alpha": 1.0,
+        "css": "#ffd600"
+      },
+      "systemFill": {
+        "hex": "#ffffff",
+        "alpha": 0.098,
+        "css": "rgba(255,255,255,0.098)"
+      },
+      "secondarySystemFill": {
+        "hex": "#ffffff",
+        "alpha": 0.0784,
+        "css": "rgba(255,255,255,0.0784)"
+      },
+      "tertiarySystemFill": {
+        "hex": "#ffffff",
+        "alpha": 0.0471,
+        "css": "rgba(255,255,255,0.0471)"
+      },
+      "quaternarySystemFill": {
+        "hex": "#ffffff",
+        "alpha": 0.0275,
+        "css": "rgba(255,255,255,0.0275)"
+      },
+      "alternatingContentBackground": [
+        {
+          "hex": "#1e1e1e",
+          "alpha": 1.0,
+          "css": "#1e1e1e"
+        },
+        {
+          "hex": "#ffffff",
+          "alpha": 0.0471,
+          "css": "rgba(255,255,255,0.0471)"
+        }
+      ]
+    }
+  }
+}
