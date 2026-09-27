@@ -123,6 +123,15 @@ macOS AXUIElement-based computer use, ported to Linux via AT-SPI2 (`gi.repositor
 | `layout_arrange` | One spec: `{"layout":"agent"\|"full"\|"split"\|"stack", ...}` |
 | `window_tile` | OS-native halves, quarters, fill, center |
 
+**Skills (load on demand)** — search first, show only what you need
+
+| Tool | What it does |
+|------|--------------|
+| `skill_search` | Rank skills in `~/.claude/skills` and `$WORKMAN_SKILL_ROOTS` against a query. Returns name, trimmed description, root, path and score, never the body |
+| `skill_show` | Load one skill's SKILL.md, or only one `## section` of it, plus the list of its other files |
+| `skill_add` | Copy a skill directory (frontmatter validated) into the first `$WORKMAN_SKILL_ROOTS` entry or a given root. Never overwrites |
+| `skill_reindex` | Rebuild the cached index now; normally automatic when a SKILL.md changes |
+
 **Memory (token-light)**
 
 | Tool | What it does |

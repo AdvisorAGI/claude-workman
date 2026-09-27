@@ -64,10 +64,11 @@ def _optional(name: str):
 
 # `_remote` because the `remote` tool below would otherwise shadow the module.
 (a11y, account, apps, bridge, chrome, esc_pause, handback, owner_pause, _remote,
- resume, session, shortcuts, shotlog, vision, workspace_layout) = (_optional(n) for n in (
-    "a11y", "account", "apps", "bridge", "chrome", "esc_pause", "handback",
-    "owner_pause", "remote", "resume", "session", "shortcuts", "shotlog", "vision",
-    "workspace_layout"))
+ resume, session, shortcuts, shotlog, skills_index, vision, workspace_layout) = (
+    _optional(n) for n in (
+        "a11y", "account", "apps", "bridge", "chrome", "esc_pause", "handback",
+        "owner_pause", "remote", "resume", "session", "shortcuts", "shotlog",
+        "skills_index", "vision", "workspace_layout"))
 
 mcp = FastMCP("claude-workman")
 
@@ -1200,6 +1201,62 @@ def session_handoff(cwd: str, content: str = "") -> dict:
     from when the context it was holding is gone.
     """
     return session.handoff(cwd, content=content)
+
+
+# ---- SKILLS (load on demand) ----------------------------------------------
+# Search first, show only what you need. A session that loads every SKILL.md
+# up front pays for skills it never uses; these tools keep a small index of
+# name + description + headings and hand back one skill, or one section of it.
+
+def _skills(run) -> dict:
+    try:
+        return run()
+    except Exception as exc:  # a tool answers with the error, never raises
+        return {"ok": False, "error": "skills_failed", "detail": f"{type(exc).__name__}: {exc}"}
+
+
+@mcp.tool()
+def skill_search(query: str, limit: int = 8) -> dict:
+    """Find skills by query. Search first, show only what you need.
+
+    Ranks every skill under ~/.claude/skills and $WORKMAN_SKILL_ROOTS against
+    the query (name hits weigh most, then headings, then description) and
+    returns up to `limit` matches as {name, description (trimmed), root, path,
+    score}. Never returns a skill body: call skill_show on the one you pick.
+    """
+    return _skills(lambda: skills_index.search(query, limit=limit))
+
+
+@mcp.tool()
+def skill_show(name: str, section: str = "", max_chars: int = 20000) -> dict:
+    """Load one skill's SKILL.md body, or just one `## section` of it.
+
+    Use after skill_search. Pass `section` (a heading, case-insensitive) to
+    load only that part; the reply lists every heading in `sections` so a
+    second, narrower call is cheap. Also lists the other files in the skill
+    directory (references, scripts) by relative path, without their contents.
+    Bodies longer than max_chars come back with truncated=true.
+    """
+    return _skills(lambda: skills_index.show(name, section=section, max_chars=max_chars))
+
+
+@mcp.tool()
+def skill_add(src_dir: str, root: str = "") -> dict:
+    """Add a skill directory to a skill root so every session can find it.
+
+    `src_dir` must hold a SKILL.md whose frontmatter has name and description.
+    It is copied to <root>/<name>; root defaults to the first entry of
+    $WORKMAN_SKILL_ROOTS. Refuses to overwrite an existing skill, and refuses
+    when no root is given and $WORKMAN_SKILL_ROOTS is unset.
+    """
+    return _skills(lambda: skills_index.add(src_dir, root=root))
+
+
+@mcp.tool()
+def skill_reindex() -> dict:
+    """Rebuild the skill index now. Rarely needed: the index already rebuilds
+    itself whenever a SKILL.md is added, removed or modified."""
+    return _skills(skills_index.reindex)
 
 
 # ---- ACCOUNT --------------------------------------------------------------

@@ -39,6 +39,7 @@ remain available as a fallback.
 - `click`, `move`, `drag`, `scroll` — pointer actions
 - `type_text`, `press_key` — keyboard input, xdotool key syntax
 - `show_cursor` — visual click-cursor overlay (ring + ripple) for human oversight
+- `skill_search`, `skill_show`, `skill_add`, `skill_reindex` — find a skill by query and load only that one (or one section of it)
 
 ## Requirements
 
