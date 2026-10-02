@@ -40,6 +40,8 @@ Park **this session's app** (the terminal or chat running the agent) in a **full
 - Dark screen: `tv_screen("off")` / `tv_screen("on")` (backlight only; the TV stays on Wi-Fi and controllable). `tv_screen("status")` reads it.
 - `tv_power_off(confirm=True)` is REAL power-off: the TV drops off Wi-Fi, Wake-on-LAN does not wake it, and only the physical remote turns it back on. POWER is not a `tv_key` name.
 - The TV's idle standby (4 hours) is on by the owner's choice. Leave that setting alone.
+- Full runbook with every live-verified fact, the hardware fault history, the headless-Air rules and the mistakes made while building this: `TV-REMOTE.md` beside this file.
+- Learned live 2026-10-02: space keys >= 0.3 s or the set drops them; `uiautomator` is the only way to read menus (screencap is empty on HDMI); `power_picture_off` is 1 = ON, 0 = OFF; Wake-on-LAN never wakes this set; blind D-pad once reached the account picker beside "Remove account", so read focus before every select.
 
 ## Install (CLI)
 
