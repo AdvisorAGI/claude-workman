@@ -11,8 +11,10 @@ On every OS the real screen, window list, app inventory and synthetic input
 are unreachable from the suite: Quartz/AX loaders are short-circuited, helper
 subprocesses (`x11._run`, `darwin._run`) return a blocked result, and
 desktop-entry directories are empty. A test that needs a backend patches it
-in. Do not stub `desktop._focused_window` here — the Linux viewer-guard tests
-drive that hook through a fake XTest channel.
+in. The LAN TV (workman.tv) is unreachable the same way: connecting raises, the
+port probes say closed, and the remote-protocol fallback refuses. Do not stub
+`desktop._focused_window` here — the Linux viewer-guard tests drive that hook
+through a fake XTest channel.
 """
 from __future__ import annotations
 
@@ -20,13 +22,17 @@ import subprocess
 
 import pytest
 
-from workman import apps, botsafety, chrome, desktop, handback, owner_pause, resume, shell_guard, x11, xtest
+from workman import apps, botsafety, chrome, desktop, handback, owner_pause, resume, shell_guard, tv, x11, xtest
 from workman.platform import ax_darwin, darwin
 
 
 def _blocked_run(cmd, timeout=20, input_text=None, **_kw):
     argv = list(cmd) if not isinstance(cmd, str) else [cmd]
     return subprocess.CompletedProcess(argv, 127, "", "blocked by conftest")
+
+
+def _no_tv(*_args, **_kwargs):
+    raise tv.TvError("blocked_by_conftest", "tests never reach the TV")
 
 
 @pytest.fixture(autouse=True)
@@ -62,6 +68,11 @@ def _no_live_desktop(monkeypatch, tmp_path):
     monkeypatch.setattr(apps, "MAC_APP_DIRS", ())
     monkeypatch.setattr(apps, "DESKTOP_DIRS", ())
     monkeypatch.setattr(apps, "WINDOWS_MENU_DIRS", ())
+
+    monkeypatch.setattr(tv, "_connect", _no_tv)
+    monkeypatch.setattr(tv, "_send_keys_remote", _no_tv)
+    monkeypatch.setattr(tv, "_port_open", lambda *_a, **_k: False)
+    monkeypatch.setattr(tv, "_link", None)
 
     handback.reset()
     resume.clear()

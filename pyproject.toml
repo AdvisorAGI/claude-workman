@@ -37,6 +37,12 @@ macos = ["pyobjc-framework-Quartz>=9.0", "pyobjc-framework-ApplicationServices>=
 # Windows needs no third-party package at all: the backend is ctypes against
 # user32/gdi32. Pillow is only a speed-up for large screenshots.
 windows = ["Pillow>=9.0"]
+# Android TV control (workman.tv). Pinned to the versions verified against the
+# owner's set. adb-shell: pure-Python ADB over TCP, because the platform `adb`
+# binary is x86-only and does not run on the ARM DGX. androidtvremote2: the
+# TV's paired remote protocol (TLS + protobuf pairing), the keys/power fallback
+# when ADB is down; reimplementing that handshake would be far more than 30 lines.
+tv = ["adb-shell==0.4.4", "androidtvremote2==0.3.2"]
 dev = ["pytest>=7.0", "Pillow>=9.0"]
 
 [project.scripts]

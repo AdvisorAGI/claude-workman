@@ -24,6 +24,23 @@ Park **this session's app** (the terminal or chat running the agent) in a **full
 - Also `layout_arrange({"layout":"agent","agent":"Terminal","work":"Firefox","side":"left"})`
 - Do this before the first screenshot of the work app.
 
+## TV (Android TV on the LAN)
+
+`tv_*` tools drive the owner's Android TV: ADB for sight and keys, the paired remote protocol as the keys/power fallback. Needs `pip install -e ".[tv]"`. Config: `WORKMAN_TV_HOST` (default 192.168.0.191), `WORKMAN_TV_KEYDIR` (default `~/.config/workman-tv`).
+
+1. `tv_status`: window, HDMI session, picture mode, which transports answer.
+2. `tv_elements` (compact UI tree, `focused` row) or `tv_screenshot`.
+3. Move: `tv_focus_text(text)` walks the D-pad there; `tv_key([...])` for anything else. TV UIs are focus-driven, never tapped.
+4. Read `focused` in every reply before the next step, then `tv_select(text)`.
+
+- Keys go one at a time, at least 0.3 s apart: the set drops bursts.
+- `tv_select` and select keys in `tv_key` (DPAD_CENTER, ENTER) refuse when the target or the focused element matches the danger list (factory reset, reset, erase, remove account, OEM unlocking, revoke USB debugging, factory menu, format, wipe), or when focus cannot be read.
+- `tv_screenshot` fails on the HDMI input (protected video layer); `tv_status` still names the window.
+- `tv_input_hdmi` goes back to the Mac's input. There is no TV shell tool, by design.
+- Dark screen: `tv_screen("off")` / `tv_screen("on")` (backlight only; the TV stays on Wi-Fi and controllable). `tv_screen("status")` reads it.
+- `tv_power_off(confirm=True)` is REAL power-off: the TV drops off Wi-Fi, Wake-on-LAN does not wake it, and only the physical remote turns it back on. POWER is not a `tv_key` name.
+- The TV's idle standby (4 hours) is on by the owner's choice. Leave that setting alone.
+
 ## Install (CLI)
 
 From a clone of this repo:

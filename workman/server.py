@@ -64,11 +64,11 @@ def _optional(name: str):
 
 # `_remote` because the `remote` tool below would otherwise shadow the module.
 (a11y, account, apps, bridge, chrome, esc_pause, handback, owner_pause, _remote,
- resume, session, shortcuts, shotlog, skills_index, vision, workspace_layout) = (
+ resume, session, shortcuts, shotlog, skills_index, tv, vision, workspace_layout) = (
     _optional(n) for n in (
         "a11y", "account", "apps", "bridge", "chrome", "esc_pause", "handback",
         "owner_pause", "remote", "resume", "session", "shortcuts", "shotlog",
-        "skills_index", "vision", "workspace_layout"))
+        "skills_index", "tv", "vision", "workspace_layout"))
 
 mcp = FastMCP("claude-workman")
 
@@ -1424,6 +1424,126 @@ def remote_status(host: str) -> dict:
         return _remote.status(host)
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "host": host}
+
+
+# ---- TV ----------------------------------------------------------------------
+# The owner's Android TV on the LAN (workman.tv). ADB gives sight and keys; the
+# paired remote protocol carries keys and power when ADB is down. TV UIs move
+# focus with the D-pad instead of taking taps, so there is no tv_click, and the
+# TV's shell stays inside the module: no tool takes a command string.
+
+def _tv(run):
+    try:
+        return run()
+    except Exception as exc:  # a tool answers with the error, never raises
+        return {"ok": False, "error": "tv_failed", "detail": f"{type(exc).__name__}: {exc}"}
+
+
+@mcp.tool()
+def tv_status() -> dict:
+    """The TV's model, Android version, sys.boot.reason, uptime, focused window
+    and app, picture mode and backlight, open TV input sessions (which HDMI is
+    on screen), screen on/off, and which transports answer (adb :5555,
+    remote :6466)."""
+    return _tv(tv.status)
+
+
+@mcp.tool()
+def tv_screenshot() -> list:
+    """The TV's own UI as an image, downscaled like `screenshot`, with the scale
+    reported. TV pixels are not desktop pixels: this never changes what
+    space='view' means for click. The HDMI input and live TV cannot be
+    captured (screencap fails on their protected video layer): that answers
+    screencap_failed with the window named, and tv_status says what is on."""
+    def run() -> list:
+        shot = tv.screenshot()
+        data = shot.pop("png", None) if isinstance(shot, dict) else None
+        if not data:
+            return [shot]
+        meta = {**shot, "screen": None, "view": None, "scale": 1.0, "resized": False}
+        try:
+            data, view = vision.to_view(data)
+            meta.update(view)
+        except vision.VisionUnavailable as exc:
+            meta["note"] = str(exc)
+        return [meta, Image(data=data, format="png")]
+    out = _tv(run)
+    return out if isinstance(out, list) else [out]
+
+
+@mcp.tool()
+def tv_elements(limit: int = 300) -> dict:
+    """The TV's UI tree from uiautomator as compact rows: text, desc, id, cls,
+    bounds, the true flags among focused/focusable/clickable/checked/selected,
+    and `label` (the children's text) on focusable rows with none of their own.
+    `focused` is the row a select press would act on. Fails while video plays,
+    because uiautomator waits for an idle UI."""
+    return _tv(lambda: tv.elements(limit=limit))
+
+
+@mcp.tool()
+def tv_key(keys: list[str], spacing_s: float = 0.3) -> dict:
+    """Press TV remote keys in order, one at a time, at least 0.3 s apart (the
+    TV drops keys sent faster), and return the focused element they ended on.
+
+    Names: DPAD_UP/DOWN/LEFT/RIGHT/CENTER, BACK, HOME, MENU, ENTER, SETTINGS,
+    TV_INPUT, INFO, VOLUME_UP/DOWN/MUTE, MEDIA_PLAY_PAUSE/PLAY/PAUSE/STOP/NEXT/
+    PREVIOUS/REWIND/FAST_FORWARD, CHANNEL_UP/DOWN, WAKEUP; aliases UP, DOWN,
+    LEFT, RIGHT, OK, MUTE. DPAD_CENTER and ENTER are refused unless the focused
+    element can be read and is not on the danger list. Without ADB the keys go
+    over the remote protocol and select is refused. POWER is not here: a dark
+    screen is tv_screen('off'), real power-off is tv_power_off.
+    """
+    return _tv(lambda: tv.key(keys, spacing_s=spacing_s))
+
+
+@mcp.tool()
+def tv_focus_text(text: str, max_steps: int = 15) -> dict:
+    """Walk D-pad focus to the element showing `text`, re-reading the UI tree
+    after every step; an exact match beats a substring. Never presses select:
+    follow with tv_select, or tv_key(['DPAD_CENTER']) once the focus is checked.
+    max_steps caps the presses (at most 40)."""
+    return _tv(lambda: tv.focus_text(text, max_steps=max_steps))
+
+
+@mcp.tool()
+def tv_select(text: str, max_steps: int = 15) -> dict:
+    """tv_focus_text, then one DPAD_CENTER on that element. Hard-refuses,
+    pressing nothing, when the target or the focused element matches the danger
+    list (factory reset, reset, erase, remove account, OEM unlocking, revoke USB
+    debugging, factory menu, format, wipe)."""
+    return _tv(lambda: tv.select(text, max_steps=max_steps))
+
+
+@mcp.tool()
+def tv_launch(package_or_activity: str) -> dict:
+    """Start a TV app: a package opens its TV launcher activity, or give
+    'package/activity'. Targets matching the danger list are refused."""
+    return _tv(lambda: tv.launch(package_or_activity))
+
+
+@mcp.tool()
+def tv_input_hdmi() -> dict:
+    """Back to the Mac's HDMI input: brings the live-TV app forward, which
+    resumes the input it last showed, and reports the open input sessions."""
+    return _tv(tv.input_hdmi)
+
+
+@mcp.tool()
+def tv_screen(state: str = "status") -> dict:
+    """The TV picture: state on | off | status. Off switches the backlight off
+    while the TV stays on Wi-Fi and fully controllable, so on brings it back;
+    it is not power. Reads the setting back and reports `screen`."""
+    return _tv(lambda: tv.screen(state))
+
+
+@mcp.tool()
+def tv_power_off(confirm: bool = False) -> dict:
+    """REAL power-off (KEYCODE_POWER). WARNING: the TV leaves Wi-Fi and
+    Wake-on-LAN does not wake it, so only the physical remote turns it back on;
+    no tool can. For a dark screen that stays controllable use tv_screen('off').
+    Without confirm=True nothing is sent and the warning comes back."""
+    return _tv(lambda: tv.power_off(confirm=confirm))
 
 
 # ---- BATCH -----------------------------------------------------------------
