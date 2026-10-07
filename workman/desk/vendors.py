@@ -48,12 +48,16 @@ def which(name: str) -> str | None:
 
 
 VENDORS: tuple[Vendor, ...] = (
-    Vendor("grok", "Grok", ("grok",), ("grok-4.6", "grok-4.5"), "grok-4.6",
+    Vendor("grok", "Grok", ("grok",), ("grok-4.7", "grok-4.6"), "grok-4.7",
            list_models=("models",)),
     Vendor("claude", "Claude", ("claude",),
            ("sonnet", "opus", "haiku", "fable"), "sonnet"),
+    # Keep the current Codex model catalogue in one place.  Desk passes the
+    # chosen ID through untouched; it does not proxy credentials or turn one
+    # provider into another.
     Vendor("codex", "Codex", ("codex",),
-           ("gpt-5.2-codex", "o3", "gpt-4.1"), "gpt-5.2-codex"),
+           ("gpt-6.1-sol", "gpt-6-astra", "gpt-6-luna", "gpt-5.6-terra"),
+           "gpt-6.1-sol"),
     Vendor("cursor", "Cursor", ("cursor-agent", "agent"),
            ("auto", "composer-2.5", "gpt-5.2"), "auto",
            list_models=("--list-models",)),
@@ -142,7 +146,12 @@ WORKMAN_PREAMBLE = (
 
 _WORKMAN_VENDOR = Vendor(
     "workman", "Workman", ("workman",),
-    ("grok-4.6",), "grok-4.6",
+    ("gpt-6.1-sol",), "gpt-6.1-sol",
+)
+
+_ORCHESTRATOR_VENDOR = Vendor(
+    "orchestrator", "Workman Orchestrator", ("codex",),
+    ("Astra → Sol 6.1 → Terra + Luna",), "Astra → Sol 6.1 → Terra + Luna",
 )
 
 
@@ -175,8 +184,17 @@ def catalog(*, refresh: bool = False) -> list[Seat]:
         if not binary:
             continue
         seats.append(Seat(vendor, binary, models_for(vendor, binary)))
+    codex = next((seat for seat in seats if seat.vendor.id == "codex"), None)
+    if codex:
+        # This is a virtual Desk seat.  It uses the existing signed-in Codex
+        # CLI for the primary lanes; it never changes any other CLI's config.
+        seats.insert(0, Seat(_ORCHESTRATOR_VENDOR, codex.binary,
+                             list(_ORCHESTRATOR_VENDOR.fallback_models)))
     if seats:
-        prefer = next((s for s in seats if s.vendor.id == "grok"), seats[0])
+        # Workman itself is a virtual Desk seat.  Prefer Codex so that the
+        # current ChatGPT/Codex lane is the default; Grok remains available as
+        # an independent seat and as the optional orchestration lens.
+        prefer = next((s for s in seats if s.vendor.id == "codex"), seats[0])
         seats.insert(0, Seat(
             _WORKMAN_VENDOR, prefer.binary, list(prefer.models),
         ))
@@ -192,6 +210,7 @@ def build_argv(
     *,
     prompt_file: str | None = None,
     auto_approve: bool = False,
+    sandbox: str | None = None,
     session_id: str | None = None,
     resume: bool = False,
 ) -> list[str]:
@@ -233,6 +252,8 @@ def build_argv(
         cmd = [binary, "exec"]
         if model:
             cmd.extend(["-m", model])
+        if sandbox:
+            cmd.extend(["--sandbox", sandbox])
         if auto_approve:
             cmd.append("--full-auto")
         cmd.append(prompt)

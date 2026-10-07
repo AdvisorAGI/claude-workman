@@ -49,6 +49,39 @@ Only vendors whose binary is on `PATH` (or `~/.grok/bin`, `~/.local/bin`) appear
 Grok is started without `XAI_API_KEY` so the logged-in seat is used. The server
 stays up after the launcher exits so chat does not die with `Failed to fetch`.
 
+### Durable model orchestration
+
+Choose **Workman Orchestrator** when a change needs an architecture, implementation,
+and independent review trail. Its primary path uses the signed-in Codex/ChatGPT CLI:
+
+1. Astra plans in a read-only sandbox.
+2. Sol 6.1 implements in the workspace only when you allow tools.
+3. Terra and Luna verify independently in read-only sandboxes.
+4. If the Grok CLI is available, it supplies a supplementary read-only lens; it
+   never replaces a ChatGPT lane.
+
+Every stage output is saved in the Desk chat. A failed architecture or build
+stage stops later stages. **Check MCP** performs a read-only audit per client:
+a CLI shown in Desk is only a discovered executable, not proof it has Workman
+registered and approved. The audit reports ready, pending, missing, or
+unavailable without changing configuration.
+
+Publishing is an explicit opt-in: select both **Allow tools** and **Publish a
+PR**. Only after Terra and Luna explicitly pass may the release lane commit
+task-owned changes, push a non-default branch, and create or update a pull
+request. It never merges or deploys, and it treats a missing PR URL as failure.
+Workman never silently rewrites client configuration, credentials, or a model
+selection.
+
+The portable [`plugin.json`](plugin.json) and [`mcp.json`](mcp.json) package
+supports ChatGPT/Codex local surfaces after an explicit install. Cursor gets an
+opt-in [configuration example](.cursor/mcp.json.example), rather than an
+auto-loaded registration. Claude and Grok retain their own client-side plugin
+registration, and Codex uses its existing `mcp_servers.workman` entry. Each
+client starts the same local stdio launcher in its own client process. A browser ChatGPT session cannot
+start a process on this machine merely because it appears in Desk; that needs a
+separate supported, securely designed connection.
+
 ---
 
 ## Why accessibility-tree clicking beats pixel clicking

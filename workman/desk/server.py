@@ -3,6 +3,8 @@ from __future__ import annotations
 
 import json
 import os
+import re
+import subprocess
 import threading
 from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
 from pathlib import Path
@@ -11,11 +13,14 @@ from urllib.parse import parse_qs, urlparse
 from . import store
 from .run import Jobs
 from .vendors import catalog
+from . import orchestrator
+from . import connectors
 
 INDEX = Path(__file__).with_name("index.html")
 TOKENS_CSS = Path(__file__).with_name("tokens") / "apple-tokens.css"
 _jobs = Jobs()
 _cwd_default = os.getcwd()
+_PR_LINE = re.compile(r"(?mi)^\s*PR\s*:\s*(https://github\.com/[^\s]+)\s*$")
 
 
 def _live_sessions() -> list[dict]:
@@ -106,7 +111,76 @@ def _seat_for(vendor_id: str):
     return seats.get(vendor_id)
 
 
-def _run_chat(chat: dict, prompt: str, auto_approve: bool, write) -> int:
+def _publication_evidence(cwd: str, output: str) -> dict:
+    """Read back the PR named by a release lane; never mutates GitHub."""
+    match = _PR_LINE.search(output or "")
+    if not match:
+        return {"verified": False, "detail": "Release report did not contain a PR URL."}
+    url = match.group(1)
+    try:
+        proc = subprocess.run(
+            ["gh", "pr", "view", url, "--json", "url,state,statusCheckRollup"],
+            cwd=cwd, capture_output=True, text=True, timeout=15,
+        )
+    except (OSError, subprocess.TimeoutExpired) as exc:
+        return {"verified": False, "url": url,
+                "detail": f"Could not verify the reported PR: {exc}"}
+    if proc.returncode:
+        return {"verified": False, "url": url,
+                "detail": "GitHub could not read the reported PR."}
+    try:
+        payload = json.loads(proc.stdout or "{}")
+    except json.JSONDecodeError:
+        return {"verified": False, "url": url,
+                "detail": "GitHub returned an unreadable PR response."}
+    return {"verified": bool(payload.get("url")) and payload.get("state") == "OPEN",
+            "url": payload.get("url") or url, "state": payload.get("state"),
+            "checks": payload.get("statusCheckRollup") or []}
+
+
+def _run_chat(chat: dict, prompt: str, auto_approve: bool, write, *, publish: bool = False) -> int:
+    if chat.get("vendor") == "orchestrator":
+        seats = {s.vendor.id: s for s in catalog()}
+        codex = seats.get("codex")
+        if codex is None:
+            write("Codex CLI is not available for orchestration.\n")
+            return 2
+
+        def run_lane(lane, lane_prompt, emit):
+            seat = seats.get(lane.vendor)
+            if seat is None:
+                return 127, f"{lane.vendor} CLI is not available"
+            chunks: list[str] = []
+            code = _jobs.get(chat["id"]).run(
+                lane.vendor, seat.binary, lane.model, lane_prompt,
+                str(chat.get("cwd") or "") or None,
+                auto_approve if lane.changes_files else False,
+                lambda chunk: (chunks.append(chunk), emit(chunk))[1],
+                sandbox=lane.sandbox,
+            )
+            return code, "".join(chunks)
+
+        if publish and not auto_approve:
+            write("Publishing requires both ‘Allow tools’ and ‘Publish a PR’. No publication was attempted.\n")
+        records = orchestrator.run(
+            prompt, run_lane, write, grok_available="grok" in seats,
+            publish=publish and auto_approve,
+        )
+        for record in records:
+            if record["name"] == "release":
+                evidence = _publication_evidence(str(chat.get("cwd") or _cwd_default),
+                                                 str(record.get("output") or ""))
+                record["github"] = evidence
+                record["passed"] = bool(record["passed"]) and bool(evidence["verified"])
+        chat["orchestration"] = records
+        summary = "\n".join(
+            f"{record['label']}: {'PASS' if record['passed'] else 'FAIL'} "
+            f"({record['vendor']}/{record['model']})" for record in records
+        )
+        code = 0 if records and all(r["passed"] for r in records if not r["optional"]) else 1
+        store.append_message(chat, "assistant", summary or "No orchestration stages ran.",
+                             exit=code, vendor="orchestrator")
+        return code
     seat = _seat_for(str(chat.get("vendor") or ""))
     if seat is None:
         write("unknown vendor\n")
@@ -168,6 +242,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         if path == "/api/status":
             self._send(200, _json(_status()), "application/json")
+            return
+        if path == "/api/connectors":
+            self._send(200, _json({"ok": True, "connectors": connectors.audit()}),
+                       "application/json")
             return
         if path == "/api/chats":
             self._send(200, _json({"ok": True, "chats": store.list_chats()}),
@@ -245,7 +323,8 @@ class Handler(BaseHTTPRequestHandler):
                 store.save_chat(chat)
                 store.upsert_item({"id": item["id"], "group": "working",
                                    "assignee": assignee})
-            self._stream_run(chat, prompt, bool(payload.get("auto_approve")))
+            self._stream_run(chat, prompt, bool(payload.get("auto_approve")),
+                             publish=bool(payload.get("publish")))
             return
         if path != "/api/run":
             self._send(404, b"not found", "text/plain")
@@ -262,9 +341,10 @@ class Handler(BaseHTTPRequestHandler):
             return
         chat = _ensure_chat(payload)
         store.save_chat(chat)
-        self._stream_run(chat, prompt, bool(payload.get("auto_approve")))
+        self._stream_run(chat, prompt, bool(payload.get("auto_approve")),
+                         publish=bool(payload.get("publish")))
 
-    def _stream_run(self, chat: dict, prompt: str, auto_approve: bool) -> None:
+    def _stream_run(self, chat: dict, prompt: str, auto_approve: bool, *, publish: bool = False) -> None:
         self.send_response(200)
         self.send_header("Content-Type", "text/plain; charset=utf-8")
         self.send_header("Cache-Control", "no-store")
@@ -281,7 +361,7 @@ class Handler(BaseHTTPRequestHandler):
             except OSError:
                 _jobs.stop(chat["id"])
 
-        _run_chat(chat, prompt, auto_approve, write)
+        _run_chat(chat, prompt, auto_approve, write, publish=publish)
 
 
 def serve(host: str = "127.0.0.1", port: int = 8767) -> ThreadingHTTPServer:

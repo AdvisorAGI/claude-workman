@@ -1,0 +1,10 @@
+{
+  "$schema": "https://developers.openai.com/plugins/mcp.schema.json",
+  "mcpServers": {
+    "workman": {
+      "type": "stdio",
+      "command": "${PLUGIN_ROOT}/bin/workman",
+      "args": []
+    }
+  }
+}

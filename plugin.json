@@ -1,0 +1,12 @@
+{
+  "$schema": "https://developers.openai.com/plugins/schema.json",
+  "name": "workman",
+  "version": "0.3.1",
+  "description": "Local desktop-control MCP connector",
+  "author": {"name": "Atmosphere AI"},
+  "homepage": "https://github.com/AdvisorAGI/claude-workman",
+  "skills": ["./skills/workman-orchestrator"],
+  "extensions": {
+    "com.openai": {"interface": {"display_name": "Workman"}}
+  }
+}
