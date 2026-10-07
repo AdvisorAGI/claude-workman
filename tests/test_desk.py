@@ -37,6 +37,8 @@ def test_claude_codex_cursor_argv():
     codex = build_argv("codex", "codex", "o3", "review", auto_approve=True)
     assert codex[:2] == ["codex", "exec"]
     assert "--full-auto" in codex
+    readonly = build_argv("codex", "codex", "gpt-5.6-terra", "review", sandbox="read-only")
+    assert readonly[readonly.index("--sandbox") + 1] == "read-only"
     cursor = build_argv("cursor", "cursor-agent", "auto", "hi")
     assert "-p" in cursor and "hi" in cursor
 
@@ -102,6 +104,13 @@ def test_parse_models():
     cursor = parse_cursor_models("Available models\nauto - Auto (default)\ngpt-5.2 - GPT\n")
     assert cursor[0] == "auto"
     assert "gpt-5.2" in cursor
+
+
+def test_publication_evidence_requires_a_pr_url():
+    from workman.desk.server import _publication_evidence
+    result = _publication_evidence(".", "VERDICT: PASS")
+    assert result["verified"] is False
+    assert "PR URL" in result["detail"]
 
 
 def test_status_loopback_and_html(tmp_path, monkeypatch):

@@ -27,6 +27,19 @@ All notable changes to claude-workman.
   each item can be assigned to an agent and **Run** starts that agent on the
   brief.
 
+### Added — durable ChatGPT-first orchestration
+
+- **Workman Orchestrator** runs a recorded CLI pipeline: Astra architecture,
+  Sol 6.1 implementation, Terra and Luna read-only verification, and an
+  optional Grok independent lens. It preserves each stage's output in the
+  Desk chat and stops before implementation if architecture fails.
+- Cursor has an opt-in MCP configuration example at `.cursor/mcp.json.example`;
+  it does not alter Claude, Grok, Codex, client credentials, or user-level settings.
+- **Check MCP** reports each installed client's Workman state without changing
+  configuration. Portable `plugin.json`/`mcp.json` metadata supports local
+  ChatGPT/Codex installation, while the explicit release lane requires Allow
+  tools, Publish a PR, both Codex verifier passes, and an actual PR URL.
+
 ### Added — workman-mode 1/4 agent strip
 
 - **`layout_agent`** — park the session app (the terminal or chat running the

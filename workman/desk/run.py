@@ -52,6 +52,7 @@ class Job:
         *,
         session_id: str | None = None,
         resume: bool = False,
+        sandbox: str | None = None,
     ) -> int:
         prompt = (prompt or "").strip()
         if not prompt:
@@ -71,7 +72,7 @@ class Job:
         argv = build_argv(
             vendor_id, binary, model, prompt,
             prompt_file=tmp, auto_approve=auto_approve,
-            session_id=session_id, resume=resume,
+            session_id=session_id, resume=resume, sandbox=sandbox,
         )
         env = launch_env()
         env["PYTHONUNBUFFERED"] = "1"

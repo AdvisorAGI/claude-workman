@@ -1,0 +1,9 @@
+{
+  "mcpServers": {
+    "workman": {
+      "type": "stdio",
+      "command": "/absolute/path/to/workman/bin/workman",
+      "args": []
+    }
+  }
+}

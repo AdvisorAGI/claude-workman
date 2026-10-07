@@ -13,7 +13,7 @@ GROUPS = (
     ("blocked", "Blocked", "#e2445c"),
     ("done", "Done", "#00c875"),
 )
-AGENTS = ("workman", "grok", "claude", "codex", "cursor")
+AGENTS = ("orchestrator", "workman", "grok", "claude", "codex", "cursor")
 
 
 def home() -> Path:
@@ -66,6 +66,7 @@ def empty_chat(chat_id: str | None = None, **extra) -> dict:
         "cwd": extra.get("cwd") or "",
         "session_id": extra.get("session_id") or str(uuid.uuid4()),
         "item_id": extra.get("item_id") or "",
+        "orchestration": list(extra.get("orchestration") or []),
         "created": now(),
         "updated": now(),
         "messages": [],

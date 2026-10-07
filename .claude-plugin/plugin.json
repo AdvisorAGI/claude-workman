@@ -1,6 +1,6 @@
 {
   "name": "workman",
-  "version": "0.3.0",
+  "version": "0.3.1",
   "description": "Human-mode desktop control as an MCP connector for Linux, macOS and Windows. Screenshot, zoom, click, type, windows, accessibility, and layout_agent (1/4 session strip, 3/4 work pane).",
   "author": {
     "name": "Atmosphere AI"

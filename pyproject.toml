@@ -1,6 +1,6 @@
 [project]
 name = "claude-workman"
-version = "0.3.0"
+version = "0.3.1"
 description = "Human-mode desktop control MCP connector for Linux, macOS and Windows — see, zoom, click, type, manage windows, and act on the accessibility tree."
 readme = "README.md"
 requires-python = ">=3.10"

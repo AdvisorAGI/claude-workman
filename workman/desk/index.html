@@ -89,6 +89,10 @@
     <label style="flex-direction:row; align-items:center; gap:6px; margin-top:16px;">
       <input id="approve" type="checkbox"> Allow tools
     </label>
+    <label style="flex-direction:row; align-items:center; gap:6px; margin-top:16px;">
+      <input id="publish" type="checkbox"> Publish a PR
+    </label>
+    <button type="button" id="check-connectors" class="ghost">Check MCP</button>
   </header>
   <div id="main">
     <div id="view-chat">
@@ -137,6 +141,7 @@ const logEl = document.getElementById("log");
 const sendBtn = document.getElementById("send");
 const stopBtn = document.getElementById("stop");
 const approveEl = document.getElementById("approve");
+const publishEl = document.getElementById("publish");
 const banner = document.getElementById("banner");
 const hint = document.getElementById("hint");
 const chatList = document.getElementById("chat-list");
@@ -320,7 +325,7 @@ async function runItem(id) {
       method: "POST",
       headers: {"Content-Type": "application/json"},
       signal: abortCtl.signal,
-      body: JSON.stringify({ id, auto_approve: approveEl.checked, cwd: cwdEl.value })
+      body: JSON.stringify({ id, auto_approve: approveEl.checked, publish: publishEl.checked, cwd: cwdEl.value })
     });
     const cid = res.headers.get("X-Chat-Id");
     if (cid) chatId = cid;
@@ -415,7 +420,8 @@ async function send() {
         model: modelEl.value,
         prompt,
         cwd: cwdEl.value,
-        auto_approve: approveEl.checked
+        auto_approve: approveEl.checked,
+        publish: publishEl.checked
       })
     });
     const cid = res.headers.get("X-Chat-Id");
@@ -438,6 +444,14 @@ async function send() {
 document.getElementById("tab-chat").onclick = () => { document.body.dataset.tab = "chat"; syncTabs(); };
 document.getElementById("tab-board").onclick = () => { document.body.dataset.tab = "board"; syncTabs(); };
 document.getElementById("new-chat").onclick = () => newChat();
+document.getElementById("check-connectors").onclick = async () => {
+  try {
+    const r = await fetch("/api/connectors");
+    const s = await r.json();
+    const lines = (s.connectors || []).map(c => `${c.label}: ${c.status} — ${c.detail}`);
+    add("sys", lines.join("\n") || "No connector status returned.");
+  } catch (_) { add("err", "Could not check connector status."); }
+};
 sendBtn.onclick = send;
 stopBtn.onclick = () => {
   fetch("/api/stop", {method:"POST", headers:{"Content-Type":"application/json"},
