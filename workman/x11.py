@@ -206,6 +206,8 @@ def focus_window(query: str, minimize_blockers: bool = True) -> dict:
         if ch is None:
             return {"ok": False, "error": "focus_restore_unavailable"}
         result = ch.restore_input_focus({"window": int(target), "revert_to": 1})
+        if result.get("ok"):
+            polite.set_target(ch.top_level_focus())
         polite.observe_focus()
         return dict(result, target=target)
     if minimize_blockers:
@@ -374,7 +376,12 @@ def _clipboard_snapshot() -> dict | None:
 def _clipboard_restore(snap: dict | None) -> None:
     if not snap or not snap.get("ok"):
         return
-    polite.sleep(PASTE_RESTORE_S)
+    # Clipboard repair is not input injection. It must complete even when
+    # owner activity/Escape interrupted the paste or its settling delay.
+    try:
+        polite.sleep(PASTE_RESTORE_S)
+    except polite.Interrupted:
+        pass
     from .platform import linux_x11
     try:
         linux_x11.clipboard_set(text=snap.get("text") or "")
@@ -445,10 +452,7 @@ def _polite_type(text: str, delay_ms: int, dwell_ms: int) -> dict:
                 polite.sleep(delay_ms / 1000.0)
         return {"ok": True, "typed_len": typed}
     finally:
-        # No clipboard mutation follows owner interruption.
-        if saved and polite.current().interrupted is None:
-            polite.guard("type_text")
-            _clipboard_restore(saved)
+        _clipboard_restore(saved)
 
 
 def type_text(text: str, delay_ms: int = 40, dwell_ms: int = 0) -> dict:
@@ -795,7 +799,12 @@ def kill_window(query: str) -> dict:
 
 def input_focus() -> dict:
     ch = _xt()
-    return ch.input_focus() if ch is not None else {"ok": False, "error": "focus_unavailable"}
+    return ch.top_level_focus() if ch is not None else {"ok": False, "error": "focus_unavailable"}
+
+
+def focused_window_identity() -> dict:
+    ch = _xt()
+    return ch.focused_window_identity() if ch is not None else {"ok": False, "error": "focus_unavailable"}
 
 
 def restore_input_focus(focus: dict) -> dict:

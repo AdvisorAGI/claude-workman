@@ -9,9 +9,11 @@ from types import SimpleNamespace
 import pytest
 
 import workman
-from workman import desktop, handback, human, owner_pause, polite, x11, xtest
+from workman import desktop, handback, human, owner_pause, polite, polite_state, x11, xtest
 from workman.platform import linux_x11
 from test_xtest import make_channel
+
+_REAL_FOCUSED_WINDOW = desktop._focused_window
 
 
 @pytest.fixture
@@ -27,7 +29,8 @@ def seat(monkeypatch):
     ch = make_channel()
     ch.display_name = ":99"
     state = SimpleNamespace(ch=ch, pointer=[10, 20], focus=100, restores=[], ghosts=[],
-                            physical_keys=set(), physical_buttons=set(), on_event=lambda e: None)
+                            physical_keys=set(), physical_buttons=set(), xtest_keys=set(), xtest_buttons=set(),
+                            click_target=100, on_event=lambda e: None)
     original = ch.xtst.XTestFakeMotionEvent
 
     def motion(dpy, screen, x, y, timestamp):
@@ -39,12 +42,14 @@ def seat(monkeypatch):
 
     def key(dpy, code, down, timestamp):
         original_key(dpy, code, down, timestamp)
+        (state.xtest_keys.add if down else state.xtest_keys.discard)(code)
         state.on_event(("key", code, bool(down)))
 
     original_button = ch.xtst.XTestFakeButtonEvent
 
     def button(dpy, code, down, timestamp):
         original_button(dpy, code, down, timestamp)
+        (state.xtest_buttons.add if down else state.xtest_buttons.discard)(code)
         state.on_event(("button", code, bool(down)))
 
     ch.xtst.XTestFakeMotionEvent = motion
@@ -52,7 +57,13 @@ def seat(monkeypatch):
     ch.xtst.XTestFakeButtonEvent = button
     ch.pointer_position = lambda: {"x": state.pointer[0], "y": state.pointer[1], "window": 100,
                                   "buttons": list(state.physical_buttons | getattr(ch, "_agent_buttons", set()))}
-    ch.core_keys_down = lambda: list(state.physical_keys)
+    ch.core_keys_down = lambda: list(state.physical_keys | state.xtest_keys)
+    ch.physical_holds = lambda: {"keys": list(state.physical_keys), "buttons": list(state.physical_buttons)}
+    ch.xtest_held = lambda: {"keys": sorted(state.xtest_keys), "buttons": sorted(state.xtest_buttons)}
+    ch.server_time = lambda: 1234
+    ch.top_level_focus = lambda: dict(ch.input_focus(), id=state.focus, name=f"window {state.focus}", **{"class": "local"})
+    ch.window_at_point = lambda x, y: {"ok": True, "id": state.click_target, "class": "local", "name": f"window {state.click_target}"}
+    monkeypatch.setattr(desktop, "_window_at_point", ch.window_at_point)
     ch.active_window_info = lambda: {"ok": True, "class": "local"}
     ch.input_focus = lambda: {"ok": True, "window": state.focus, "revert_to": 1}
 
@@ -62,6 +73,11 @@ def seat(monkeypatch):
         return {"ok": True, "readback": ch.input_focus()}
 
     ch.restore_input_focus = restore
+    # This fixture declares the fake window as explicitly selected for typing.
+    # Tests covering the no-target case remove this persisted selection.
+    with polite_state.locked(":99") as store:
+        store.data["target"] = ch.top_level_focus()
+        store.write()
     monkeypatch.setattr(x11, "_xt", lambda: ch)
     ghost = SimpleNamespace(notify=lambda display, x, y: state.ghosts.append((display, x, y)),
                             hide=lambda display: state.ghosts.append((display, "hide")))
@@ -76,15 +92,14 @@ def touch_owner():
     p.touch()
 
 
-def test_default_private_display_ignores_owner_files(seat, monkeypatch):
+def test_default_private_display_ignores_presence_but_honours_escape(seat, monkeypatch):
     monkeypatch.delenv("WORKMAN_POLITE", raising=False)
-    owner_pause.pause_from_escape()
     touch_owner()
-    monkeypatch.setattr(owner_pause, "blocked", lambda name: pytest.fail("private display read shared switches"))
     monkeypatch.setattr(owner_pause, "human_active", lambda *a: pytest.fail("private display read owner stamp"))
     assert desktop.move(40, 50)["ok"]
-    assert seat.pointer == [40, 50]
-    assert seat.ghosts == []
+    owner_pause.pause_from_escape()
+    assert desktop.move(60, 70)["error"] == "input_disabled"
+    assert seat.pointer == [40, 50] and seat.ghosts == []
 
 
 def test_mode_defaults_and_non_x11(monkeypatch):
@@ -104,11 +119,13 @@ def test_single_start_wait_and_restore_for_nested_human_click(seat, monkeypatch)
     result = human.human_click(50, 60, random.Random(2))
     assert result["ok"]
     assert waits == [{"max_wait": 20.0, "quiet_s": 2.0}]
-    assert seat.pointer == [10, 20]
+    assert seat.pointer == [50, 60]
     assert seat.ch.xtst.events == [("move", 10, 20), ("move", 30, 40), ("move", 50, 60),
-                                   ("button", 1, True), ("button", 1, False), ("move", 10, 20)]
+                                   ("button", 1, True), ("button", 1, False)]
     assert seat.restores == []
-    assert result["polite"]["pointer_verified"]
+    assert result["polite"]["restore"] == "deferred"
+    restored = polite.restore_pending(force=True)
+    assert restored["pointer_verified"] and seat.pointer == [10, 20]
     assert all(g[0] == ":99" for g in seat.ghosts)
 
 
@@ -152,7 +169,6 @@ def test_foreign_pointer_interrupt_without_stamp_stops_drag_and_releases_only_ag
             seat.physical_keys.add(37)
             seat.physical_buttons.add(3)
     seat.on_event = event
-    monkeypatch.setattr(seat.ch, "release_xtest_held", lambda: pytest.fail("broad XTEST release"))
     out = desktop.drag(30, 40, 100, 200)
     assert out["error"] == "human_active"
     assert out["at"] == [30, 40] and out["dragged"] is False
@@ -189,11 +205,13 @@ def test_never_claim_or_release_foreign_holds(seat):
 
 def test_standalone_hold_defers_pointer_restore_until_release(seat):
     out = desktop.mouse_down(1, x=30, y=40)
-    assert out["polite"]["restore"] == "deferred_until_release"
+    assert out["polite"]["restore"] == "deferred"
+    assert polite.restore_pending(force=True)["restore"] == "deferred_until_release"
     assert seat.pointer == [30, 40]
     out = desktop.mouse_up(1)
-    assert out["ok"] and seat.pointer == [10, 20]
-    assert out["polite"]["pointer_verified"]
+    assert out["ok"] and seat.pointer == [30, 40]
+    assert polite.restore_pending(force=True)["pointer_verified"]
+    assert seat.pointer == [10, 20]
 
 
 def test_standalone_release_preserves_owner_pointer_and_never_waits(seat, monkeypatch):
@@ -206,27 +224,34 @@ def test_standalone_release_preserves_owner_pointer_and_never_waits(seat, monkey
     assert not seat.ch.owned_holds()
 
 
-def test_focus_restore_only_after_action_changes_focus(seat):
+def test_focus_restore_only_after_debounce_or_handback(seat):
+    seat.click_target = 200
     seat.on_event = lambda e: setattr(seat, "focus", 200) if e == ("button", 1, True) else None
     out = desktop.click(30, 40)
-    assert out["ok"] and seat.restores == [100]
-    assert out["polite"]["focus"]["readback"]["window"] == 100
+    assert out["ok"] and seat.restores == [] and seat.focus == 200
+    assert out["polite"]["restore"] == "deferred"
+    assert polite.restore_pending(force=True)["focus"]["readback"]["window"] == 100
 
 
-def test_focus_failure_reports_readback(seat):
+def test_focus_failure_reports_readback_and_failure(seat):
+    seat.click_target = 200
     seat.on_event = lambda e: setattr(seat, "focus", 200) if e == ("button", 1, True) else None
     seat.ch.restore_input_focus = lambda focus: {"ok": False, "readback": {"window": 200}}
-    out = desktop.click(30, 40)
-    assert out["polite"]["focus"]["ok"] is False
-    assert out["polite"]["focus"]["readback"]["window"] == 200
+    assert desktop.click(30, 40)["ok"]
+    out = polite.restore_pending(force=True)
+    assert out["error"] == "restore_failed" and out["restore"] == "restore_failed"
+    assert out["focus"]["readback"]["window"] == 200
 
 
-def test_polite_focus_never_minimizes_or_raises(seat, monkeypatch):
+def test_polite_focus_uses_activation_and_keeps_target_until_debounce(seat, monkeypatch):
     monkeypatch.setattr(x11, "_require", lambda name: None)
     monkeypatch.setattr(x11, "list_windows", lambda: [{"id": "200", "name": "target"}])
     monkeypatch.setattr(x11, "_run", lambda *a, **kw: pytest.fail("window subprocess mutation"))
     out = desktop.focus_window("target")
-    assert out["ok"] and seat.restores == [200, 100]
+    assert out["ok"] and seat.restores == [200] and seat.focus == 200
+    assert desktop.type_text("a", delay_ms=0)["ok"]
+    assert polite.restore_pending(force=True)["restore"] == "restored"
+    assert seat.restores == [200, 100]
 
 
 def test_backend_error_cleans_only_owned_holds_and_restores(seat, monkeypatch):
@@ -255,7 +280,7 @@ def test_no_ghost_module_is_best_effort(seat, monkeypatch):
     monkeypatch.setitem(sys.modules, "workman.ghost_cursor", None)
     monkeypatch.delattr(workman, "ghost_cursor")
     assert desktop.move(30, 40)["ok"]
-    assert seat.pointer == [10, 20]
+    assert seat.pointer == [30, 40]
 
 
 def test_owner_arrives_between_typing_calls_does_not_overcount(seat, monkeypatch):
@@ -333,12 +358,13 @@ def test_release_failure_stays_owned_for_retry(seat, monkeypatch):
     assert seat.ch.owned_holds() and seat.pointer == [30, 40]
     seat.ch.xtst.XTestFakeButtonEvent = original
     assert desktop.mouse_up(1)["ok"]
-    assert not seat.ch.owned_holds() and seat.pointer == [10, 20]
+    assert not seat.ch.owned_holds() and seat.pointer == [30, 40]
+    assert polite.restore_pending(force=True)["restore"] == "restored"
+    assert seat.pointer == [10, 20]
 
 
-def test_handback_polite_never_uses_broad_release(seat, monkeypatch):
+def test_handback_polite_queries_xtest_and_releases(seat, monkeypatch):
     assert desktop.key_down("ctrl")["ok"]
-    monkeypatch.setattr(seat.ch, "release_xtest_held", lambda: pytest.fail("broad shared device release"))
     out = handback.release_all()
     assert out["ok"] and not seat.ch.owned_holds()
     assert seat.ch.xtst.events == [("key", 37, True), ("key", 37, False)]
@@ -349,19 +375,6 @@ def test_unknown_outer_action_checks_switch_during_hold(seat):
     out = polite.run("batch", lambda: desktop.press_key("ctrl+t", hold_ms=3000))
     assert out["error"] == "input_disabled"
     assert not seat.ch.owned_holds()
-
-
-def test_focus_native_api_sets_without_raise_and_reports_readback(monkeypatch):
-    ch = make_channel()
-    calls = []
-    def get_focus(dpy, window, revert):
-        window.value = 123
-        revert.value = 1
-    ch.x11.XGetInputFocus = get_focus
-    ch.x11.XSetInputFocus = lambda *args: calls.append(args)
-    out = ch.restore_input_focus({"window": 456, "revert_to": 1})
-    assert calls == [(1, 456, 1, xtest.CurrentTime)]
-    assert out["ok"] is False and out["readback"]["window"] == 123
 
 
 def test_human_scroll_interrupt_counts_first_wheel_event(seat, monkeypatch):
@@ -440,15 +453,13 @@ def test_missing_channel_refuses_polite_input_without_raw_injection(seat, monkey
 
 
 def test_pointer_restore_keeps_remote_viewer_guard(seat, monkeypatch):
-    def event(e):
-        if e == ("move", 30, 40):
-            monkeypatch.setattr(desktop, "_focused_window", lambda: {"class": "Remmina"})
-            desktop._VIEWER_SEEN["at"] = -1
-    seat.on_event = event
-    out = desktop.move(30, 40)
-    assert out["ok"] and seat.pointer == [30, 40]
-    assert out["polite"]["pointer"]["error"] == "remote_viewer_focused"
-    assert out["polite"]["pointer_verified"] is False
+    assert desktop.move(30, 40)["ok"]
+    monkeypatch.setattr(desktop, "_focused_window", lambda: {"class": "Remmina"})
+    desktop._VIEWER_SEEN["at"] = -1
+    out = polite.restore_pending(force=True)
+    assert out["error"] == "restore_failed" and seat.pointer == [30, 40]
+    assert out["pointer"]["error"] == "remote_viewer_focused"
+    assert out["pointer_verified"] is False
     assert seat.ch.xtst.events == [("move", 30, 40)]
 
 
@@ -472,7 +483,9 @@ def test_delayed_click_focus_is_restored_without_raising(seat, monkeypatch):
             seat.focus = delayed.pop()
     monkeypatch.setattr(polite.time, "sleep", settle)
     out = desktop.click(30, 40)
-    assert out["ok"] and seat.focus == 100 and seat.restores == [100]
+    assert out["ok"] and seat.focus == 200 and seat.restores == []
+    assert polite.restore_pending(force=True)["restore"] == "restored"
+    assert seat.focus == 100 and seat.restores == [100]
 
 
 def test_long_typing_refreshes_ghost_without_motion(seat, monkeypatch):
@@ -503,3 +516,316 @@ def test_human_scroll_refusal_before_next_tick_does_not_duplicate_progress(seat,
     monkeypatch.setattr(desktop, "scroll", scroll)
     out = human.human_scroll("down", amount=2)
     assert out["error"] == "human_active" and out["amount"] == 1 and out["remaining"] == 1
+
+
+def _keyboard_process(queue, seat):
+    # Forked fake backend only; inherited no-live fixture and timer stub.
+    result = desktop.type_text("a", delay_ms=0)
+    queue.put((result, list(seat.ch.xtst.events)))
+
+
+def test_target_lock_survives_separate_processes_and_restore(seat):
+    import multiprocessing
+    ctx = multiprocessing.get_context("fork")
+    seat.click_target = 200
+    seat.on_event = lambda e: setattr(seat, "focus", 200) if e == ("button", 1, True) else None
+    assert desktop.click(30, 40)["ok"]
+    for expected_ok in (True, False):
+        queue = ctx.Queue()
+        worker = ctx.Process(target=_keyboard_process, args=(queue, seat))
+        worker.start()
+        result, events = queue.get(timeout=3)
+        worker.join(3)
+        assert worker.exitcode == 0
+        assert result["ok"] is expected_ok
+        if expected_ok:
+            assert events[-2:] == [("key", 38, True), ("key", 38, False)]
+            assert polite.restore_pending(force=True)["restore"] == "restored"
+            assert seat.focus == 100
+        else:
+            assert result["error"] == "focus_changed"
+            assert result["intended_window"]["window"] == 200
+            assert result["current_window"]["window"] == 100
+            assert events == seat.ch.xtst.events  # nothing sent by the new process
+        queue.close()
+
+
+def test_keyboard_without_explicit_target_sends_nothing(seat):
+    with polite_state.locked(":99") as store:
+        store.data.pop("target", None)
+        store.write()
+    out = desktop.type_text("hello", delay_ms=0)
+    assert out["error"] == "focus_changed" and out["intended_window"] is None
+    assert out["current_window"]["window"] == 100
+    assert seat.ch.xtst.events == []
+
+
+def test_owner_focus_change_between_calls_refuses_and_names_windows(seat):
+    assert desktop.type_text("a", delay_ms=0)["ok"]
+    seat.focus = 300
+    before = list(seat.ch.xtst.events)
+    out = desktop.press_key("Return")
+    assert out["error"] == "focus_changed"
+    assert out["intended_window"]["window"] == 100 and out["current_window"]["window"] == 300
+    assert seat.ch.xtst.events == before
+
+
+def test_keyboard_focus_change_does_not_retarget(seat):
+    seat.on_event = lambda e: setattr(seat, "focus", 300) if e == ("key", 38, True) else None
+    out = desktop.type_text("ab", delay_ms=0)
+    assert out["error"] == "focus_changed" and out["typed_len"] == 1
+    assert out["intended_window"]["window"] == 100 and out["current_window"]["window"] == 300
+    assert seat.ch.xtst.events == [("key", 38, True), ("key", 38, False)]
+    with polite_state.locked(":99") as store:
+        assert store.data["target"]["window"] == 100
+
+
+def test_focus_check_after_claim_query_is_immediately_before_key_injection(seat):
+    calls = [0]
+    def server_time():
+        calls[0] += 1
+        seat.focus = 300
+        return 1234
+    seat.ch.server_time = server_time
+    out = desktop.type_text("a", delay_ms=0)
+    assert out["error"] == "focus_changed" and calls == [1]
+    assert seat.ch.xtst.events == []
+
+
+def test_debounce_rearms_and_preserves_original_snapshot(seat, monkeypatch):
+    now = [10.0]
+    monkeypatch.setattr(polite.time, "monotonic", lambda: now[0])
+    assert desktop.move(30, 40)["polite"]["restore"] == "deferred"
+    assert polite.restore_pending()["restore"] == "deferred"
+    now[0] = 13.0
+    assert desktop.move(50, 60)["ok"]
+    with polite_state.locked(":99.0") as store:
+        assert store.data["snapshot"]["pointer"] == [10, 20]
+        assert store.data["due"] == 18
+    now[0] = 17.99
+    assert polite.restore_pending()["restore"] == "deferred"
+    assert seat.pointer == [50, 60]
+    now[0] = 18
+    assert polite.restore_pending()["restore"] == "restored"
+    assert seat.pointer == [10, 20]
+
+
+@pytest.mark.parametrize("change", ["focus", "pointer", "stamp", "crash"])
+def test_stale_snapshot_never_restores_over_owner_changes(seat, change):
+    assert desktop.move(30, 40)["ok"]
+    if change == "focus":
+        seat.focus = 300
+    elif change == "pointer":
+        seat.pointer[:] = [70, 80]
+    elif change == "stamp":
+        touch_owner()
+    else:
+        with polite_state.locked(":99") as store:
+            store.data["inflight"] = True
+            store.write()
+    before = list(seat.ch.xtst.events)
+    out = polite.restore_pending(force=True)
+    assert out["restore"] == "skipped_owner_changed"
+    assert seat.ch.xtst.events == before and seat.restores == []
+    with polite_state.locked(":99") as store:
+        assert not store.data.get("snapshot")
+
+
+def _hold_display_lock(display, ready, release):
+    with polite_state.locked(display):
+        ready.set()
+        assert release.wait(3)
+
+
+def test_timer_cannot_restore_during_another_process_action(seat):
+    import multiprocessing
+    ctx = multiprocessing.get_context("fork")
+    assert desktop.move(30, 40)["ok"]
+    ready, release = ctx.Event(), ctx.Event()
+    worker = ctx.Process(target=_hold_display_lock, args=(":99", ready, release))
+    worker.start()
+    try:
+        assert ready.wait(3)
+        assert polite.restore_pending()["restore"] == "deferred_action_running"
+        assert seat.pointer == [30, 40]
+    finally:
+        release.set()
+        worker.join(3)
+    assert worker.exitcode == 0
+    assert polite.restore_pending(force=True)["restore"] == "restored"
+
+
+def test_scheduler_failure_reports_completed_input_and_unarmed_restore(seat, monkeypatch):
+    monkeypatch.setattr(polite, "_schedule", lambda display: {"ok": False, "error": "spawn failed"})
+    out = desktop.move(30, 40)
+    assert out["ok"] is False and out["error"] == "restore_failed" and out["input_completed"]
+    assert out["polite"]["restore"] == "restore_unarmed" and seat.pointer == [30, 40]
+
+
+def test_interrupt_and_handback_release_missing_local_tracking(seat, monkeypatch):
+    seat.xtest_keys.update((37, 50))
+    seat.xtest_buttons.update((1, 3))
+    seat.physical_keys.add(50)
+    seat.physical_buttons.add(3)
+    owner_pause.pause_from_escape()
+    out = desktop.move(30, 40)
+    assert out["error"] == "input_disabled"
+    released = out["polite"]["release"]
+    assert released["released_keys"] == [37] and released["released_buttons"] == [1]
+    assert released["skipped_physical"] == {"keys": [50], "buttons": [3]}
+    assert seat.physical_keys == {50} and seat.physical_buttons == {3}
+    seat.physical_keys.clear()
+    seat.physical_buttons.clear()
+    # hand_back gets all remaining XTEST state, even though both local sets are empty.
+    monkeypatch.setattr(handback, "park_pointer", lambda: pytest.fail("legacy park"))
+    monkeypatch.setattr(handback, "wake_screen", lambda: {"ok": True})
+    monkeypatch.setattr(handback, "verify", lambda: {"xtest_held": seat.ch.xtest_held(), "held_tracked": handback.held(), "our_windows_open": []})
+    out = handback.hand_back(close_launched_windows=False)
+    assert out["released"]["released_keys"] == [50] and out["released"]["released_buttons"] == [3]
+    assert not seat.xtest_keys and not seat.xtest_buttons
+
+
+def test_clipboard_restored_after_interrupt_without_input(seat, monkeypatch):
+    clipboard = ["owner clipboard"]
+    monkeypatch.setattr(x11, "active_window_is_browser", lambda: True)
+    monkeypatch.setattr(seat.ch, "needs_remap", lambda sym: True)
+    monkeypatch.setattr(linux_x11, "clipboard_get", lambda: {"ok": True, "text": clipboard[0]})
+    monkeypatch.setattr(linux_x11, "clipboard_set", lambda text: clipboard.__setitem__(0, text) or {"ok": True})
+    def paste(text):
+        clipboard[0] = text
+        owner_pause.pause_from_escape()
+        touch_owner()
+        polite.progress(pressed=True)
+        polite.guard("paste")
+    monkeypatch.setattr(x11, "_paste", paste)
+    out = desktop.type_text("é", delay_ms=0)
+    assert out["error"] == "input_disabled" and out["typed_len"] == 1
+    assert clipboard[0] == "owner clipboard" and seat.ch.xtst.events == []
+
+
+def test_paste_outer_gate_checks_target_before_clipboard_mutation(seat):
+    seat.focus = 300
+    writes = []
+    out = polite.run("paste", lambda: writes.append("clipboard") or desktop.press_key("ctrl+t"))
+    assert out["error"] == "focus_changed" and writes == []
+
+
+def test_handback_restores_snapshot_and_skips_legacy_park(seat, monkeypatch):
+    seat.click_target = 200
+    seat.on_event = lambda e: setattr(seat, "focus", 200) if e == ("button", 1, True) else None
+    assert desktop.click(30, 40)["ok"]
+    monkeypatch.setattr(handback, "park_pointer", lambda: pytest.fail("legacy park"))
+    monkeypatch.setattr(handback, "wake_screen", lambda: {"ok": True})
+    monkeypatch.setattr(handback, "verify", lambda: {"held_tracked": handback.held(), "our_windows_open": []})
+    out = handback.hand_back(close_launched_windows=False)
+    assert out["ok"] and out["polite"]["restore"] == "restored"
+    assert seat.pointer == [10, 20] and seat.focus == 100
+
+
+def test_failed_focus_identity_is_closed_to_viewer_guard(seat, monkeypatch):
+    monkeypatch.setattr(linux_x11, "focused_window_identity", lambda: {"ok": False})
+    monkeypatch.setattr(desktop, "_focused_window", _REAL_FOCUSED_WINDOW)
+    out = desktop.click(30, 40)
+    assert out["error"] == "remote_viewer_unknown" and seat.ch.xtst.events == []
+
+
+def test_own_motion_exact_claim_and_kvm_events_interrupt(seat):
+    from workman import esc_pause
+    watcher = esc_pause.RawInputWatcher({5}, display=":99")
+    decisions = []
+    def event(e):
+        if e[0] == "move":
+            own = {"kind": "motion", "source": 5, "detail": 0, "time": 1234, "position": list(e[1:])}
+            decisions.append(watcher.feed(own))
+            # Different KVM motion cannot consume the already consumed claim.
+            decisions.append(watcher.feed(dict(own, position=[900, 800])))
+            if decisions[-1] == "human":
+                touch_owner()
+    seat.on_event = event
+    out = desktop.move(30, 40)
+    assert decisions == ["agent", "human"]
+    assert out["error"] == "human_active" and seat.ch.xtst.events == [("move", 30, 40)]
+
+
+def test_unrelated_kvm_key_interrupts_during_claimed_agent_burst(seat):
+    from workman import esc_pause
+    watcher = esc_pause.RawInputWatcher({5}, display=":99")
+    decisions = []
+    def event(e):
+        if e == ("key", 37, True):
+            decisions.append(watcher.feed({"kind": "key_press", "source": 5, "detail": 37, "time": 1234}))
+            decisions.append(watcher.feed({"kind": "key_press", "source": 5, "detail": 56, "time": 1234}))
+            if decisions[-1] == "human":
+                touch_owner()
+    seat.on_event = event
+    out = desktop.press_key("ctrl+t")
+    assert decisions == ["agent", "human"] and out["error"] == "human_active"
+    assert seat.ch.xtst.events == [("key", 37, True), ("key", 37, False)]
+
+
+@pytest.mark.parametrize("failure", ["time", "ledger"])
+def test_release_survives_claim_bookkeeping_failure(seat, monkeypatch, failure):
+    assert desktop.key_down("ctrl")["ok"]
+    assert desktop.mouse_down(1)["ok"]
+    if failure == "time":
+        seat.ch.server_time = lambda: (_ for _ in ()).throw(xtest.ChannelError("time query failed"))
+    else:
+        monkeypatch.setattr(owner_pause, "claim_agent_event", lambda *a, **kw: (_ for _ in ()).throw(OSError("ledger unwritable")))
+    owner_pause.pause_from_escape()
+    out = handback.release_all()
+    assert out["verified"] and not seat.ch.owned_holds()
+    assert seat.ch.xtst.events[-2:] == [("key", 37, False), ("button", 1, False)]
+    assert len(out["bookkeeping_errors"]) == 2
+
+
+def test_post_send_timestamp_failure_preserves_typed_progress_and_cleanup(seat):
+    calls = [0]
+    def timestamp():
+        calls[0] += 1
+        if calls[0] > 1:
+            raise xtest.ChannelError("post-send time query failed")
+        return 1234
+    seat.ch.server_time = timestamp
+    out = desktop.type_text("a", delay_ms=0)
+    assert out["ok"] and out["typed_len"] == 1
+    assert seat.ch.xtst.events == [("key", 38, True), ("key", 38, False)]
+    assert not seat.xtest_keys and not seat.ch.owned_holds()
+    assert out["polite"]["claim_errors"]
+
+
+def test_async_query_failure_is_persisted_as_restore_failed(seat, monkeypatch):
+    assert desktop.move(30, 40)["ok"]
+    monkeypatch.setattr(seat.ch, "xtest_held", lambda: (_ for _ in ()).throw(xtest.ChannelError("device query failed")))
+    out = polite.restore_pending(force=True)
+    assert out["error"] == "restore_failed" and out["detail"] == "device query failed"
+    assert seat.pointer == [30, 40]
+    with polite_state.locked(":99") as store:
+        assert not store.data.get("snapshot") and store.data["last_restore"] == out
+
+
+def test_release_scheduler_failure_is_visible(seat, monkeypatch):
+    assert desktop.mouse_down(1)["ok"]
+    monkeypatch.setattr(polite, "_schedule", lambda display: {"ok": False, "error": "spawn failed"})
+    out = desktop.mouse_up(1)
+    assert out["error"] == "restore_failed" and out["input_completed"]
+    assert not seat.xtest_buttons
+
+
+def test_separate_release_rearms_debounce_without_pointer_or_focus_reads(seat, monkeypatch):
+    now = [10.0]
+    monkeypatch.setattr(polite.time, "monotonic", lambda: now[0])
+    assert desktop.mouse_down(1, x=30, y=40)["ok"]
+    pointer_read, focus_read = seat.ch.pointer_position, seat.ch.top_level_focus
+    monkeypatch.setattr(seat.ch, "pointer_position", lambda: (_ for _ in ()).throw(RuntimeError("read failed")))
+    monkeypatch.setattr(seat.ch, "top_level_focus", lambda: (_ for _ in ()).throw(RuntimeError("read failed")))
+    now[0] = 14.0
+    assert desktop.mouse_up(1)["ok"]
+    with polite_state.locked(":99") as store:
+        assert store.data["due"] == 19.0
+        assert store.data["snapshot"]["pointer"] == [10, 20]
+    monkeypatch.setattr(seat.ch, "pointer_position", pointer_read)
+    monkeypatch.setattr(seat.ch, "top_level_focus", focus_read)
+    now[0] = 16.0
+    assert polite.restore_pending()["restore"] == "deferred"
+    now[0] = 19.0
+    assert polite.restore_pending()["restore"] == "restored" and seat.pointer == [10, 20]

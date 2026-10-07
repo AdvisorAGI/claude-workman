@@ -43,15 +43,29 @@ class TestPresence:
         owner_pause.mark_human_input()
         assert os.stat(owner_pause._stamp_path(owner_pause.HUMAN_STAMP)).st_mtime_ns == first
 
-    def test_agent_claims_its_own_injections_briefly(self):
-        assert owner_pause.agent_claims() is False
-        owner_pause.mark_agent_input()
-        assert owner_pause.agent_claims() is True
-        assert owner_pause.agent_claims(escape=True) is False
+    def test_activity_stamp_never_claims_an_event(self):
         owner_pause.mark_agent_input(escape=True)
-        assert owner_pause.agent_claims(escape=True) is True
-        _age_stamp(owner_pause.AGENT_STAMP, owner_pause.AGENT_FRESH_S + 1)
         assert owner_pause.agent_claims() is False
+        assert owner_pause.agent_claims({"kind": "key_press", "detail": 9, "time": 20}) is False
+
+    def test_exact_claim_is_single_use_and_display_scoped(self):
+        event = {"kind": "key_press", "detail": 38, "time": 1001}
+        token = owner_pause.claim_agent_event(":0", "key_press", 38, 1000)
+        owner_pause.finish_agent_event(":0", token, 1002)
+        assert not owner_pause.agent_claims(event, display=":99")
+        assert not owner_pause.agent_claims(dict(event, detail=56))
+        assert not owner_pause.agent_claims(dict(event, kind="key_release"))
+        assert not owner_pause.agent_claims(dict(event, time=2000))
+        assert owner_pause.agent_claims(event)
+        assert not owner_pause.agent_claims(event)
+
+    def test_server_time_wrap_and_failed_request_removal(self):
+        token = owner_pause.claim_agent_event(":0", "button_release", 1, 0xfffffffe)
+        owner_pause.finish_agent_event(":0", token, 2)
+        assert owner_pause.agent_claims({"kind": "button_release", "detail": 1, "time": 1})
+        token = owner_pause.claim_agent_event(":0", "key_press", 38, 1)
+        owner_pause.finish_agent_event(":0", token, None)
+        assert not owner_pause.agent_claims({"kind": "key_press", "detail": 38, "time": 1})
 
 
 class TestWaitForQuiet:

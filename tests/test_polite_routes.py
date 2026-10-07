@@ -4,7 +4,7 @@ import ctypes
 
 import pytest
 
-from workman import atspi, owner_pause, resume, server
+from workman import atspi, owner_pause, polite, resume, server
 from test_polite import seat, touch_owner
 
 
@@ -16,6 +16,10 @@ def test_paused_batch_never_reaches_native_toolkit(seat, monkeypatch):
 
 
 def test_native_edit_yields_when_owner_arrives_during_lookup(seat, monkeypatch):
+    monkeypatch.setattr(seat.ch, "top_level_focus", seat.ch.input_focus)
+    monkeypatch.setattr(polite, "_schedule", lambda display: {"ok": True})
+    focused = polite.run("focus_window", lambda: polite.set_target(seat.ch.input_focus()) or {"ok": True})
+    assert focused["ok"], focused
     writes = []
     node = SimpleNamespace(get_editable_text_iface=lambda: SimpleNamespace(
         set_text_contents=lambda value: writes.append(value)))
@@ -37,6 +41,21 @@ def test_extension_mutation_obeys_escape(seat, monkeypatch, polite_on):
     owner_pause.pause_from_escape()
     monkeypatch.setattr(server.bridge, "call", lambda *a, **k: pytest.fail("paused extension mutation"))
     assert server.bridge_tabs_activate(42)["error"] == "input_disabled"
+
+
+def test_private_display_extension_mutation_obeys_escape(seat, monkeypatch):
+    monkeypatch.delenv("WORKMAN_POLITE", raising=False)
+    owner_pause.pause_from_escape()
+    monkeypatch.setattr(owner_pause, "human_active", lambda *args: pytest.fail("private owner activity"))
+    monkeypatch.setattr(server.bridge, "call", lambda *args, **kwargs: pytest.fail("paused mutation"))
+    assert server.bridge_tabs_activate(42)["error"] == "input_disabled"
+
+
+def test_private_display_extension_mutation_ignores_shared_presence(seat, monkeypatch):
+    monkeypatch.delenv("WORKMAN_POLITE", raising=False)
+    monkeypatch.setattr(owner_pause, "human_active", lambda *args: pytest.fail("private owner activity"))
+    monkeypatch.setattr(server.bridge, "call", lambda *args, **kwargs: {"ok": True})
+    assert server.bridge_tabs_activate(42)["ok"]
 
 
 def test_resume_does_not_repeat_completed_clicks_or_key():

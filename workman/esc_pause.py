@@ -16,7 +16,7 @@ subprocess, no text parsing, no polling: the process sleeps in XNextEvent).
 Raw events name their source device, so keys injected through XTEST are told
 apart from a real keyboard. The owner's Mac keyboard arrives through the
 Deskflow KVM as XTEST too, so an XTEST event is his unless a workman process
-stamped an injection in the last second (`owner_pause.agent_claims`).
+registered that exact key/button or absolute-motion event (`owner_pause.agent_claims`).
 XRecord cannot do any of that: it reports an injected Escape exactly like a
 pressed one, and an agent's own Escape would pause every agent mid-task.
 
@@ -107,25 +107,21 @@ class RawInputWatcher:
     `feed(event)` takes {"kind", "source", "detail"} as `xtest.Channel.
     next_raw_event` returns it and answers "escape" | "human" | "agent" |
     None. Physical devices are always the owner. XTEST devices are the owner
-    too (Deskflow KVM) unless a workman process claimed an injection within
-    the last second; `claims` is injected so tests do not need the stamps.
+    too (Deskflow KVM) unless an exact, single-use key/button or absolute-motion claim matches;
+    `claims` is injected so tests do not need the claim ledger.
     """
 
-    def __init__(self, injected: set[int], claims=None):
+    def __init__(self, injected: set[int], claims=None, display=":0"):
         self.injected = set(injected)
         self.held: set[int] = set()
-        self.claims = claims or owner_pause.agent_claims
+        self.claims = claims or (lambda event: owner_pause.agent_claims(event, display=display))
 
     def feed(self, ev: dict | None) -> str | None:
         if not ev:
             return None
         kind, source, code = ev.get("kind"), ev.get("source"), ev.get("detail")
-        if source in self.injected:
-            if kind == "key_press" and code == X11_ESCAPE:
-                if self.claims(escape=True):
-                    return "agent"
-            elif self.claims(escape=False):
-                return "agent"
+        if source in self.injected and self.claims(ev):
+            return "agent"
         # From here the event is the owner's, physical or KVM-relayed.
         if kind in ("key_press", "key_release") and code in X11_MODIFIERS:
             if kind == "key_press":
@@ -151,7 +147,7 @@ def release_agent_holds(display: str | None = None) -> dict:
         if ch is None:
             return {"ok": False, "error": "no XTest channel"}
         out = ch.release_xtest_held()
-        out["ok"] = True
+        out.setdefault("ok", not out.get("still_held", {}).get("keys") and not out.get("still_held", {}).get("buttons"))
         return out
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
@@ -270,7 +266,7 @@ def run_x11_native(display: str | None = None) -> int:
         _log("owner-pause: no XTEST device found, so agent keys cannot be told "
              "from yours; not listening. Use Workman Input Controls STOP BOTH")
         return 1
-    watcher = RawInputWatcher(injected)
+    watcher = RawInputWatcher(injected, display=ch.display_name)
     start_with_input_on()
     _write_pid()
     _log(f"owner-pause: listening on {ch.display_name} (XI2 raw, no grab); XTEST ids "

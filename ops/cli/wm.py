@@ -24,9 +24,9 @@ Usage: wm.py [--host <device>] <verb> [args]
   move x y                    move through the same owner gate
   scroll up|down|left|right [amount]
   drag from_x from_y to_x to_y
-  burst '<JSON actions>'      one focus/click/type burst; restore owner state at its end
+  burst '<JSON actions>'      one focus/click/type sequence; owner restoration is deferred
   type <text>                 type literal text into the focused window
-  paste <text>                guarded text insertion (interruptible; Unicode may use a temporary clipboard)
+  paste <text>                clipboard paste behind the owner gate (Command-V on macOS, Ctrl-V on X11)
   key <combo>                 press a key; xdotool syntax everywhere (ctrl+l, super+v, Return); cmd/command is mapped
   elements [app] [filter]     actionable accessibility elements (needs the Accessibility grant on macOS)
   human on|off|status         persistent Human Mode for later runs (state file ~/.claude/tools/.wm-human); WM_HUMAN=0 per run
@@ -45,6 +45,11 @@ Remote: `--host mac-mini` (or WM_HOST=mac-mini) runs the verb on that machine ov
 (workman.remote; path picked by ~/.ssh/fleet-connect.sh: cable, LAN, Headscale, Cloudflare). The remote executes
 this same file, so nothing has to be installed over there beyond a Python and its backend venv.
 Legacy aliases kept from the DGX original: tree [app] [filter], click_el <name> [role] [app], focused.
+Polite X11 mode locks the intended top-level on focus/click. Keyboard calls refuse
+focus_changed without input if focus differs; screenshot to verify the target and result.
+Separate calls may continue inside the inactivity window. New actions reset restoration:
+WORKMAN_POLITE_RESTORE_AFTER_S defaults to 5 seconds, followed by owner idle. handoff
+requests restoration immediately. A focus/pointer readback mismatch reports restore_failed.
 A blank capture on macOS means the Workman daemon is down or Workman.app lacks Screen Recording:
 run `wm.py platform` (shows daemon + grants) or `python -m atmos_computer.install --status`.
 """
@@ -453,12 +458,69 @@ def v_type(text):
 
 
 def v_paste(text):
-    if KIND == "workman":
-        # A detached xclip + key is not one gated action, may select the wrong
-        # display, and can overwrite the owner's clipboard before a refusal.
-        # Use Workman's bounded text transport, including its Unicode fallback.
-        return S.type_text(text, delay_ms=0)
-    return S.computer_paste(text=text)
+    if KIND != "workman":
+        return S.computer_paste(text=text)
+    from workman import desktop, owner_pause, polite
+
+    def paste():
+        module = desktop.active()
+        # macOS and polite-off routes have no Action. Check the keyboard gate
+        # before touching the clipboard, even on a private X11 display.
+        if polite.current() is None:
+            if owner_pause.blocked("press_key"):
+                return owner_pause.refusal("paste")
+            if polite.presence_enabled(module) and owner_pause.human_active():
+                busy = owner_pause.wait_for_human_quiet()
+                if owner_pause.blocked("press_key"):
+                    return owner_pause.refusal("paste")
+                if busy:
+                    return owner_pause.refusal("paste", error="human_active")
+        polite.guard("paste")
+        platform = getattr(module, "PLATFORM", "")
+        if platform == "macOS":
+            try:
+                copied = subprocess.run(["pbcopy"], input=text, text=True,
+                                        capture_output=True, timeout=5)
+            except (OSError, subprocess.SubprocessError) as exc:
+                return {"ok": False, "error": "clipboard_failed", "via": "pbcopy",
+                        "detail": type(exc).__name__}
+            if copied.returncode:
+                return {"ok": False, "error": "clipboard_failed", "via": "pbcopy"}
+            key = "super+v"
+        elif platform == "Linux/X11":
+            # xclip forks its selection owner. Detach output pipes so that
+            # owner can outlive this CLI, without keeping the relay open.
+            copied = None
+            try:
+                payload = text.encode("utf-8")
+                copied = subprocess.Popen(
+                    ["xclip", "-display", module.display_name(), "-selection", "clipboard", "-in"],
+                    stdin=subprocess.PIPE, stdout=subprocess.DEVNULL, stderr=subprocess.DEVNULL,
+                    start_new_session=True)
+                copied.communicate(input=payload, timeout=5)
+            except (OSError, UnicodeError, subprocess.SubprocessError) as exc:
+                if copied is not None:
+                    try:
+                        if copied.poll() is None:
+                            copied.kill()
+                        copied.communicate(timeout=1)
+                    except (OSError, subprocess.SubprocessError):
+                        pass
+                return {"ok": False, "error": "clipboard_failed", "via": "xclip",
+                        "detail": type(exc).__name__}
+            if copied.returncode:
+                return {"ok": False, "error": "clipboard_failed", "via": "xclip"}
+            key = "ctrl+v"
+        else:
+            copied = desktop.clipboard_set(text=text)
+            if not copied.get("ok"):
+                return copied
+            key = "ctrl+v"
+        # The desktop route rechecks the intended focus immediately before
+        # key injection. Never inject through a raw key helper.
+        return desktop.press_key(key)
+
+    return polite.run("paste", paste)
 
 
 def v_key(combo):

@@ -104,7 +104,10 @@ def _focused_window():
     try:
         hook = getattr(active(), "focused_window_identity", None)
         if hook is not None:
-            return hook()
+            identity = hook()
+            if polite.current() is not None and (not isinstance(identity, dict) or not identity.get("ok")):
+                return FOCUS_UNREADABLE
+            return identity
         from . import x11
         ch = x11._xt()
         if ch is not None:
@@ -252,16 +255,16 @@ def _safe_inner(name: str, *args, **kwargs) -> dict:
                 elif name == "scroll":
                     exc.result = dict(exc.result, amount=0)
                 raise
-        elif polite.gate_enabled(active()):
+        else:
             if owner_pause.blocked(name):
                 return owner_pause.refusal(name)
-            if name in owner_pause.MOUSE_ACTIONS:
+            if polite.presence_enabled(active()) and name in owner_pause.MOUSE_ACTIONS:
                 # A backend that can tell the pointer was moved by someone else
                 # (X11: it is not where the agent last put it) reports the owner.
                 moved = getattr(active(), "foreign_pointer_motion", None)
                 if moved is not None and moved():
                     owner_pause.mark_human_input()
-            if owner_pause.human_active():
+            if polite.presence_enabled(active()) and owner_pause.human_active():
                 still_busy = owner_pause.wait_for_human_quiet()
                 if owner_pause.blocked(name):
                     return owner_pause.refusal(name)

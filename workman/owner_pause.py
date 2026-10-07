@@ -50,7 +50,7 @@ MOUSE_ACTIONS = {
     "click", "click_with", "move", "drag", "hover", "scroll", "scroll_at",
     "mouse_down",
 }
-KEYBOARD_ACTIONS = {"type_text", "press_key", "key_down"}
+KEYBOARD_ACTIONS = {"type_text", "press_key", "key_down", "paste"}
 BOTH_ACTIONS = {"focus_window", "kill_window", "window_action", "window_geometry"}
 INPUT_ACTIONS = MOUSE_ACTIONS | KEYBOARD_ACTIONS | BOTH_ACTIONS
 
@@ -62,7 +62,7 @@ AGENT_ESCAPE_STAMP = "agent-escape.stamp"
 HUMAN_QUIET_S = float(os.environ.get("WORKMAN_HUMAN_QUIET_S", "1.0"))
 #: How long one agent action will wait for that quiet before giving up.
 HUMAN_YIELD_S = float(os.environ.get("WORKMAN_HUMAN_YIELD_S", "3.0"))
-#: An XTEST event this soon after an agent stamp is the agent's own.
+#: Legacy stamp ages remain status information, never event attribution.
 AGENT_FRESH_S = 1.0
 AGENT_ESCAPE_FRESH_S = 0.5
 _MARK_THROTTLE_S = 0.1
@@ -232,11 +232,83 @@ def human_input_age() -> float | None:
     return _age(HUMAN_STAMP)
 
 
-def agent_claims(escape: bool = False) -> bool:
-    """Would an XTEST event arriving now be a workman agent's own?"""
-    age = agent_escape_age() if escape else agent_input_age()
-    limit = AGENT_ESCAPE_FRESH_S if escape else AGENT_FRESH_S
-    return age is not None and age <= limit
+def agent_claims(event: dict | None = None, *, display: str = ":0", escape=False) -> bool:
+    """Consume an exact key/button or absolute-motion claim, never an action."""
+    if not event or event.get("kind") not in ("key_press", "key_release", "button_press", "button_release", "motion"):
+        return False
+    with _claims(display) as ledger:
+        now = time.monotonic()
+        for claim in ledger:
+            if (claim["kind"] == event.get("kind") and claim["detail"] == event.get("detail")
+                    and 0 <= now - claim["at"] <= 0.5):
+                if claim["kind"] == "motion" and claim.get("position") != event.get("position"):
+                    continue
+                timestamp = event.get("time")
+                # Server times are 32-bit milliseconds and wrap around.
+                if timestamp is None or not 0 <= ((int(timestamp) - claim["server_time"]) & 0xffffffff) <= claim["span"]:
+                    continue
+                ledger.remove(claim)
+                return True
+    return False
+
+
+from contextlib import contextmanager
+import hashlib
+import tempfile
+import uuid
+
+
+@contextmanager
+def _claims(display):
+    from .polite_state import display_key
+    root = _root()
+    root.mkdir(mode=0o700, parents=True, exist_ok=True)
+    key = hashlib.sha256(display_key(display).encode()).hexdigest()[:20]
+    path = root / f"agent-events-{key}.json"
+    lock = os.open(str(path) + ".lock", os.O_CREAT | os.O_RDWR | os.O_CLOEXEC | os.O_NOFOLLOW, 0o600)
+    try:
+        if fcntl is not None:
+            fcntl.flock(lock, fcntl.LOCK_EX)
+        try:
+            ledger = json.loads(path.read_text())
+            if not isinstance(ledger, list):
+                ledger = []
+        except (OSError, ValueError):
+            ledger = []
+        now = time.monotonic()
+        ledger = [c for c in ledger if isinstance(c, dict) and 0 <= now - c.get("at", -1) <= 0.5]
+        yield ledger
+        fd, tmp = tempfile.mkstemp(dir=root, prefix=".agent-events-")
+        try:
+            with os.fdopen(fd, "w") as stream:
+                json.dump(ledger[-256:], stream)
+            os.replace(tmp, path)
+        finally:
+            if os.path.exists(tmp):
+                os.unlink(tmp)
+    finally:
+        os.close(lock)
+
+
+def claim_agent_event(display: str, kind: str, detail: int, server_time: int, *, position=None) -> str:
+    """Register just before this connection emits one event, never an action."""
+    token = uuid.uuid4().hex
+    with _claims(display) as ledger:
+        ledger.append({"token": token, "kind": kind, "detail": int(detail),
+                       "server_time": int(server_time) & 0xffffffff, "span": 50,
+                       "at": time.monotonic(), "position": list(position) if position is not None else None})
+    return token
+
+
+def finish_agent_event(display: str, token: str, server_time: int | None):
+    with _claims(display) as ledger:
+        for claim in list(ledger):
+            if claim["token"] == token:
+                if server_time is None:
+                    ledger.remove(claim)
+                else:
+                    claim["span"] = min(50, (int(server_time) - claim["server_time"]) & 0xffffffff)
+                break
 
 
 def human_active(quiet_s: float | None = None) -> bool:

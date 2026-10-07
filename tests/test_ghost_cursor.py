@@ -781,3 +781,13 @@ def test_long_runtime_path_and_unsafe_socket_mode_fail_closed(monkeypatch):
     finally:
         server.close()
         path.unlink()
+
+
+def test_draw_only_demo_never_calls_input_or_restore_scheduler(monkeypatch):
+    from workman import polite, polite_restore
+    forbidden = lambda *a, **kw: pytest.fail("draw-only demo reached input/restore")
+    monkeypatch.setattr(polite, "restore_pending", forbidden)
+    monkeypatch.setattr(polite_restore, "ensure", forbidden)
+    clock, drawing, server = fake_loop(monkeypatch)
+    ghost._serve(":0", server, deadline=100.5, demo=(400, 300))
+    assert clock.now == 100.5 and drawing.draws and drawing.closed == 1

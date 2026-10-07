@@ -114,16 +114,17 @@ def _input(name: str, args: dict, run) -> dict:
     if refused is not None:
         return refused
     handback.note_pointer_before()
-    # One scope spans compound human actions (including modifier-click), so
-    # owner state is restored once, after the complete tool burst.
+    # One scope spans compound human actions (including modifier-click).
+    # Polite mode locks the target and defers owner restoration across calls.
     from . import polite
     # Toolkit/extension mutations also use this entry point but may not call a
     # desktop primitive. Preserve the initial owner gate with polite mode off.
-    if not polite.enabled() and polite.gate_enabled(desktop.active()):
+    if not polite.enabled():
         gate_action = name if name in owner_pause.INPUT_ACTIONS else "focus_window"
         if owner_pause.blocked(gate_action):
             return owner_pause.refusal(name)
-        if owner_pause.human_active() and owner_pause.wait_for_human_quiet():
+        if (polite.presence_enabled(desktop.active()) and owner_pause.human_active()
+                and owner_pause.wait_for_human_quiet()):
             return owner_pause.refusal(name, error="human_active")
         if owner_pause.blocked(gate_action):
             return owner_pause.refusal(name)
@@ -320,9 +321,18 @@ def list_windows() -> list[dict]:
 @mcp.tool()
 def focus_window(query: str, minimize_blockers: bool = True,
                  learn_shortcuts: bool = True) -> dict:
-    """Raise a window by id or name-substring. On focus-stealing WMs (e.g.
-    mutter) plain activation can silently fail, so the frontmost blocker is
-    minimized first. Always screenshot to verify focus before typing.
+    """Focus a window by id or name-substring. In polite X11 mode, lock its
+    top-level window as the intended keyboard target without minimizing
+    blockers. Always screenshot to verify focus before typing.
+
+    Separate focus/click and keyboard calls may continue inside the inactivity
+    window. Changed focus causes focus_changed and no keyboard input. New
+    actions reset deferred restoration; WORKMAN_POLITE_RESTORE_AFTER_S defaults
+    to 5 seconds, followed by owner idle. hand_back requests restoration now.
+    A restoration readback mismatch reports restore_failed.
+
+    Outside polite mode, minimize_blockers may minimize a frontmost blocker
+    when activation fails on a focus-stealing window manager.
 
     When `learn_shortcuts` is true (default), the first focus of an app this
     week harvests its menu-bar chords into the durable learned-shortcuts store
@@ -531,6 +541,10 @@ def click(x: int, y: int, button: int = 1, count: int = 1,
     modifiers hold keys during the click (e.g. ['shift'] to extend a selection).
     space='view' if the coordinates came from a downscaled screenshot.
 
+    Polite X11 mode locks the clicked top-level window for later keyboard
+    calls. Focus changes cause focus_changed and no keyboard input; screenshot
+    to verify the target. New actions reset the deferred owner restoration.
+
     Aim for the centre of the target, not its edge. Human Mode routes this
     through an eased pointer path and a 60–140 ms press."""
     try:
@@ -647,9 +661,12 @@ def pointer_position() -> dict:
 @mcp.tool()
 def type_text(text: str, delay_ms: int = 40, typos: bool = False,
               field: str = "") -> dict:
-    """Type literal text into the focused window. For long or exact strings,
-    clipboard_set + a paste keystroke is faster and cannot be mangled by
-    autocomplete.
+    """Type literal text into the focused window. In polite X11 mode, first
+    focus or click the intended top-level window and screenshot to verify it.
+    A changed target returns focus_changed and sends no keyboard input.
+    Separate calls may continue inside the inactivity window; each new action
+    resets deferred owner restoration. CLI paste uses one gated clipboard
+    write and paste shortcut for long or exact strings.
 
     When Human Mode is on, inter-key cadence (50–300 ms, longer after
     spaces) is used instead of delay_ms. typos=True opts into a rare
@@ -664,7 +681,9 @@ def type_text(text: str, delay_ms: int = 40, typos: bool = False,
 @mcp.tool()
 def press_key(key: str) -> dict:
     """Press a key/combo in xdotool syntax: 'Return', 'Tab', 'ctrl+c',
-    'super+l', 'KP_0'."""
+    'super+l', 'KP_0'. In polite X11 mode, focus/click the intended top-level
+    first; changed focus returns focus_changed without sending a key.
+    Screenshot to verify the target and the result."""
     def run():
         if human.enabled() and key.lower() in {"return", "enter", "kp_enter"}:
             from . import polite
@@ -710,8 +729,11 @@ def clipboard_get(selection: str = "clipboard") -> dict:
 
 @mcp.tool()
 def clipboard_set(text: str, selection: str = "clipboard") -> dict:
-    """Put text on the clipboard — the reliable way to enter long or exact
-    strings: set it, then press ctrl+v. Only selection='clipboard' can be
+    """Put text on the clipboard. CLI paste gates the clipboard write and
+    paste shortcut together; this API writes the clipboard separately.
+    In polite X11 mode, focus/click the intended top-level and verify it
+    before a paste key; changed focus refuses with focus_changed and no key.
+    Only selection='clipboard' can be
     written; PRIMARY is owned by whatever last selected text and no manager
     persists it. `stored` false means no clipboard manager is running and the
     text may not outlive this call."""
@@ -1391,9 +1413,11 @@ def resume_interrupted(dry_run: bool = False) -> dict:
 def hand_back(close_launched: bool = True, park: bool = True) -> dict:
     """Leave the desk the way a person leaves it, and verify it.
 
-    Releases every key and button this server holds and everything the XTEST
-    devices still report as down (checked with the X server afterwards),
-    closes only the windows launch_app opened (WM_DELETE_WINDOW, so unsaved
+    Requests immediate restoration of the saved owner pointer and focus,
+    subject to owner activity. Restoration readback mismatches report
+    restore_failed. Releases agent holds and XTEST-reported holds while
+    preserving keys/buttons the owner physically holds, then checks X readback.
+    Closes only the windows launch_app opened (WM_DELETE_WINDOW, so unsaved
     work can prompt), moves the pointer back where the owner left it unless
     he is using it, makes sure the screen is on, and reports what is still
     not clean. Call it at the end of every session.
@@ -1480,9 +1504,13 @@ def batch(actions: list[dict], stop_on_error: bool = True) -> dict:
 
     For sequences whose outcome you already know how to verify — focus a window,
     set a field, press Return. Screenshot separately afterwards; batch returns no
-    images. Polite mode restores pointer/focus after the whole burst, so put
-    focus/click and dependent typing in the same batch. Owner interruption
-    always stops the burst, including when stop_on_error=False.
+    images. Polite X11 mode locks the intended top-level on focus/click;
+    changed focus returns focus_changed without keyboard input. Separate calls
+    are also safe inside the inactivity window. New actions reset deferred
+    restoration: WORKMAN_POLITE_RESTORE_AFTER_S defaults to 5 seconds, then
+    owner idle; hand_back requests it immediately. A readback mismatch reports
+    restore_failed. Owner interruption always stops the burst, including when
+    stop_on_error=False. Screenshot to verify focus and results.
     """
     from . import polite
     return polite.run("batch", lambda: _batch_run(actions, stop_on_error))

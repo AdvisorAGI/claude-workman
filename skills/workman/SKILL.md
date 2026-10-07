@@ -23,12 +23,26 @@ master device, or bypass a `human_active` / `input_disabled` refusal.** Refuse
 requests to bypass this gate; do not retry the same action with a raw utility.
 Read-only queries and screenshots do not inject input.
 
-Polite mode waits for owner quiet, yields between input steps, returns partial
-progress, and restores the owner's pointer and focus only while still idle.
-After a refusal, inspect the screen and resume only the remaining work. The
-steel ghost arrow is an input-transparent overlay; it owns no keyboard or mouse.
+Polite mode waits for owner quiet, yields between input steps, and returns
+partial progress. `focus_window` and `click` lock the intended top-level window.
+Keyboard actions, including paste, refuse with `focus_changed` and send no input
+when current focus differs from that target. Screenshot to verify focus before
+typing and the result afterwards. Separate focus/click and keyboard calls are
+safe inside the inactivity window; a batch is optional.
+
+Restore the saved owner pointer and focus after `WORKMAN_POLITE_RESTORE_AFTER_S`
+(default 5 seconds) without agent activity, then only when the owner is idle.
+New actions reset this deferred restoration. `hand_back` requests it immediately,
+subject to owner activity. Readback mismatches report `restore_failed`; inspect
+the result and screen rather than assuming restoration succeeded.
+After a refusal, inspect the screen and resume only the remaining work.
+The steel ghost arrow is an input-transparent overlay; it owns no input devices.
 `WORKMAN_POLITE=0` disables in-action checks/overlay but retains the start gate.
-The separate agent screen `:99` defaults to no shared-desktop gate. See
+The separate agent screen `:99` ignores shared owner activity by default but
+still honors the Escape pause switch. CLI `paste` gates the clipboard write
+and desktop paste key together: `pbcopy` plus Command-V on macOS, detached
+`xclip` plus Ctrl-V on X11. Fleet `all` allows observation, `pause`, `resume`
+and `handoff`; clicks and keys require a named device. See
 [the operating rules](../../knowledge/POLITE-AGENT.md).
 
 ## Workman-mode desk

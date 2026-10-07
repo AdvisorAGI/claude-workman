@@ -7,8 +7,8 @@ keeps the small amount of state that makes that checkable, and `hand_back`
 does the work and VERIFIES it with the X server rather than assuming.
 
 What it never does: touch a window the agent did not open, move the
-pointer while the owner is using it, or send a key release for a key the
-agent never pressed (the owner may be physically holding it).
+pointer while the owner is using it, or send a key release overlapping a
+physical hold. Cleanup queries XTEST state as well as local tracking.
 """
 from __future__ import annotations
 
@@ -326,7 +326,7 @@ def owned_holds() -> bool:
 
 
 def release_owned() -> dict:
-    """Interruption cleanup: no broad XTEST or blind modifier/button releases."""
+    """Release queried XTEST holds, including missed tracking, with physical checks."""
     from . import x11
     ch = x11._xt()
     if ch is not None:
@@ -362,7 +362,11 @@ def release_all() -> dict:
     XTEST devices still hold. `verified` is that answer, not a guess."""
     from . import polite
     if polite.enabled():
-        return polite.run("key_up", release_owned)
+        out = polite.run("key_up", release_owned)
+        if out.get("verified"):
+            _HELD["keys"].clear()
+            _HELD["buttons"].clear()
+        return out
     out: dict = {"tracked": held(), "released": {"keys": [], "buttons": []}, "errors": []}
     for key in list(_HELD["keys"]):
         r = desktop.key_up(key)
@@ -419,7 +423,7 @@ def release_all() -> dict:
                 pass
         out["verified"] = None
         out["note"] = "no XTest channel: released blind, could not verify with the server"
-    out["ok"] = not out["errors"]
+    out["ok"] = not out["errors"] and out.get("verified") is not False
     return out
 
 
@@ -590,6 +594,11 @@ def hand_back(close_launched_windows: bool = True, park: bool = True) -> dict:
     """Everything above, in order, then the checklist a person would run
     before walking away. `clean` is True only when every check passed."""
     out: dict = {"released": release_all()}
+    from . import polite
+    polite_mode = polite.enabled()
+    if polite_mode:
+        # Restore the persisted burst snapshot once; never legacy park afterwards.
+        out["polite"] = polite.restore_pending(force=True)
     tracked = _load_entries()
     if tracked is _UNREADABLE:
         out["launched"] = "unknown"
@@ -601,12 +610,19 @@ def hand_back(close_launched_windows: bool = True, park: bool = True) -> dict:
         if out["closed"].get("launched") == "unknown":
             out["launched"] = "unknown"
     if park:
-        out["pointer"] = park_pointer()
+        if polite_mode:
+            restore = out["polite"]
+            out["pointer"] = {"ok": restore.get("ok", False), "parked": restore.get("restore") == "restored",
+                              "reason": restore.get("restore")}
+        else:
+            out["pointer"] = park_pointer()
     out["screen"] = wake_screen()
     out["verify"] = verify()
     xt = out["verify"].get("xtest_held") or {}
     checks = {
-        "nothing_held_by_agent": not xt.get("keys") and not xt.get("buttons")
+        "nothing_held_by_agent": out["released"].get("verified") is not False
+        and not out["verify"].get("xtest_held_error")
+        and not xt.get("keys") and not xt.get("buttons")
         and not out["verify"]["held_tracked"]["keys"]
         and not out["verify"]["held_tracked"]["buttons"],
         "our_windows_closed": (
@@ -614,8 +630,9 @@ def hand_back(close_launched_windows: bool = True, park: bool = True) -> dict:
             else (not out["verify"]["our_windows_open"] if close_launched_windows else True)
         ),
         "pointer_parked": (out["pointer"].get("parked") or out["pointer"].get("reason")
-                           in ("owner_active", "remote_viewer_focused")) if park else True,
+                           in ("owner_active", "remote_viewer_focused", "skipped_owner_changed", "nothing_pending", "deferred_owner_active")) if park else True,
         "screen_on": out["screen"].get("on", True) is not False,
+        "polite_restore": out.get("polite", {}).get("ok", True),
         "no_grab": True,  # this server never grabs; see owner_pause and esc_pause
     }
     out["checks"] = checks

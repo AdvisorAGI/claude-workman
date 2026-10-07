@@ -20,7 +20,7 @@ import subprocess
 
 import pytest
 
-from workman import apps, botsafety, chrome, desktop, handback, owner_pause, resume, shell_guard, x11, xtest
+from workman import apps, botsafety, chrome, desktop, handback, owner_pause, resume, shell_guard, x11, xtest, polite
 from workman.platform import ax_darwin, darwin
 
 
@@ -31,6 +31,7 @@ def _blocked_run(cmd, timeout=20, input_text=None, **_kw):
 
 @pytest.fixture(autouse=True)
 def _no_live_desktop(monkeypatch, tmp_path):
+    monkeypatch.setattr(polite, "_schedule", lambda display: {"ok": True, "timer": "mocked"})
     monkeypatch.setenv("WORKMAN_XTEST", "0")
     # Polite-specific tests explicitly enable it with a mocked backend. Never
     # start a real overlay or restore focus from a generic unit test.

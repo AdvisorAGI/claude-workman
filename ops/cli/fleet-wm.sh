@@ -27,12 +27,12 @@ if [ -z "$dev" ] || [ -z "$verb" ]; then
 fi
 devices="$dev"
 [ "$dev" = all ] && devices="$ALL"
-# Fan-out is for observation only. Input must target one explicitly named
-# device; every verb is dispatched by wm.py into Workman's owner gate.
+# Fan-out allows observation and the safety verbs. Input must target one
+# explicitly named device and dispatches through Workman's owner gate.
 if [ "$dev" = all ]; then
   case "$verb" in
-    shot|zoom|region|windows|active|platform|status|ping|elements|tree|focused) ;;
-    *) echo 'fleet-wm: input requires one device; all is observation only' >&2; exit 2 ;;
+    shot|zoom|region|windows|active|platform|status|ping|elements|tree|focused|pause|resume|handoff) ;;
+    *) echo 'fleet-wm: input requires one device; all allows observation and safety verbs' >&2; exit 2 ;;
   esac
 fi
 mkdir -p "$SHOTS"

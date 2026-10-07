@@ -9,6 +9,7 @@ pure helpers (keysym tables, combo parsing) too.
 from __future__ import annotations
 
 import threading
+import ctypes
 
 import pytest
 
@@ -86,6 +87,7 @@ def make_channel() -> xtest.Channel:
     ch._scratch_banned = set()
     ch._xi_opcode = None
     ch._raw_selected = False
+    ch.physical_holds = lambda: {"keys": [], "buttons": []}
     return ch
 
 
@@ -225,10 +227,11 @@ class TestHeldState:
     def test_release_xtest_held_lets_go_of_everything_and_reports(self, ch, monkeypatch):
         answers = [{"keys": [37, 50], "buttons": [1]}, {"keys": [], "buttons": []}]
         monkeypatch.setattr(ch, "xtest_held", lambda: answers.pop(0))
+        monkeypatch.setattr(ch, "physical_holds", lambda: {"keys": [], "buttons": []})
         out = ch.release_xtest_held()
         assert ch.xtst.events == [("key", 37, False), ("key", 50, False), ("button", 1, False)]
-        assert out == {"released_keys": [37, 50], "released_buttons": [1],
-                       "still_held": {"keys": [], "buttons": []}}
+        assert out["released_keys"] == [37, 50] and out["released_buttons"] == [1]
+        assert out["verified"] and out["still_held"] == {"keys": [], "buttons": []}
 
     def test_buttons_from_pointer_mask(self):
         assert xtest.Channel._buttons_from_mask(1 << 8) == [1]
@@ -260,3 +263,121 @@ class TestWindowAtPoint:
         assert ch.window_at_point(60, 60)["id"] == 2
         assert ch.window_at_point(10, 10)["id"] == 1
         assert ch.window_at_point(900, 900) is None
+
+
+class TestPoliteFocusNative:
+    def test_ewmh_source_timestamp_active_client_and_mismatched_readback(self, ch, monkeypatch):
+        from workman import polite
+        ch.server_time = lambda: 9876
+        ch.top_level_focus = lambda: {"ok": True, "window": 123}
+        ch._atom = lambda name: 88
+        sent = []
+        def send(dpy, root, propagate, mask, event):
+            ev = ctypes.cast(event, ctypes.POINTER(xtest.XClientMessageEvent)).contents
+            sent.append((root, propagate, mask, ev.type, ev.window, ev.message_type, ev.format, list(ev.data)))
+            return 1
+        ch.x11.XSendEvent = send
+        ch.x11.XSetInputFocus = lambda *a: pytest.fail("bare focus restore")
+        clock = [0.0]
+        monkeypatch.setattr(xtest.time, "monotonic", lambda: clock[0])
+        monkeypatch.setattr(xtest.time, "sleep", lambda seconds: clock.__setitem__(0, clock[0] + seconds))
+        out = ch.restore_input_focus({"window": 456})
+        assert sent == [(2, 0, xtest.SubstructureMask, xtest.ClientMessage, 456, 88, 32, [2, 9876, 123, 0, 0])]
+        assert out["error"] == "restore_failed" and out["readback"]["window"] == 123
+        assert out["timestamp"] == 9876 and out["source"] == 2
+
+    def test_zero_timestamp_refuses_before_sending(self, ch):
+        ch.server_time = lambda: 0
+        ch.x11.XSendEvent = lambda *a: pytest.fail("zero-time focus request")
+        assert ch.restore_input_focus({"window": 456})["error"] == "restore_failed"
+
+    def test_focus_restore_verifies_actual_top_level(self, ch):
+        ch.server_time = lambda: 15
+        focuses = iter(({"ok": True, "window": 100}, {"ok": True, "window": 200, "id": 200}))
+        ch.top_level_focus = lambda: next(focuses)
+        ch._atom = lambda name: 88
+        ch.x11.XSendEvent = lambda *a: 1
+        out = ch.restore_input_focus({"window": 200})
+        assert out["ok"] and out["readback"]["window"] == 200
+
+    def test_child_with_class_resolves_to_ewmh_client_not_child_or_frame(self, ch):
+        ch.input_focus = lambda: {"ok": True, "window": 300}
+        ch._client_ids = lambda prop: [200]
+        ch._identity = lambda wid: {"ok": True, "id": wid, "class": "child" if wid == 300 else "client"}
+        def query(dpy, wid, root, parent, children, count):
+            ctypes.cast(root, ctypes.POINTER(ctypes.c_ulong))[0] = 2
+            ctypes.cast(parent, ctypes.POINTER(ctypes.c_ulong))[0] = {300: 200, 200: 400, 400: 2}[wid]
+            ctypes.cast(count, ctypes.POINTER(ctypes.c_uint))[0] = 0
+            return 1
+        ch.x11.XQueryTree = query
+        out = ch.top_level_focus()
+        assert out["window"] == 200 and out["class"] == "client"
+
+    def test_timestamp_comes_from_server_property_event(self, ch, monkeypatch):
+        writes, phase = [], [0]
+        ch._time_window = 70
+        ch._atom = lambda name: 80
+        def change(*args):
+            writes.append(args)
+            phase[0] = 1
+        def check(dpy, window, mask, event):
+            if phase[0] != 1:
+                return 0
+            ev = ctypes.cast(event, ctypes.POINTER(xtest.XEvent)).contents
+            ev.xproperty.type = xtest.PropertyNotify
+            ev.xproperty.atom = 80
+            ev.xproperty.time = 5678
+            phase[0] = 2
+            return 1
+        ch.x11.XChangeProperty = change
+        ch.x11.XCheckWindowEvent = check
+        assert ch.server_time() == 5678
+        assert writes[0][1:6] == (70, 80, 80, 8, 0)
+        assert ch.xtst.events == []
+
+
+class TestPhysicalOverlap:
+    def test_missing_local_tracking_releases_device_state_and_skips_physical(self, ch):
+        states = iter(({"keys": [37, 50], "buttons": [1, 3]}, {"keys": [50], "buttons": [3]}))
+        ch.xtest_held = lambda: next(states)
+        ch.physical_holds = lambda: {"keys": [50], "buttons": [3]}
+        out = ch.release_xtest_held()
+        assert ch.xtst.events == [("key", 37, False), ("button", 1, False)]
+        assert out["skipped_physical"] == {"keys": [50], "buttons": [3]}
+        assert not out["verified"] and not out["ok"]
+
+    def test_physical_state_query_failure_never_sends_speculative_release(self, ch):
+        ch.xtest_held = lambda: {"keys": [37], "buttons": [1]}
+        ch.physical_holds = lambda: (_ for _ in ()).throw(xtest.ChannelError("missing device"))
+        out = ch.release_xtest_held()
+        assert out["errors"] == ["missing device", "missing device"]
+        assert out["ok"] is False and ch.xtst.events == []
+
+    def test_legacy_tracked_key_and_button_releases_preserve_physical_overlap(self, ch):
+        ch._agent_keys = {37}
+        ch._agent_buttons = {1}
+        ch.physical_holds = lambda: {"keys": [37], "buttons": [1]}
+        assert ch.key("ctrl", False) is False
+        assert ch.button(1, False) is False
+        assert ch.xtst.events == [] and ch.owned_holds()
+
+    def test_physical_query_excludes_xtest_and_merged_masters(self, ch):
+        # Exercise the real device-filter implementation with fake XI states.
+        ch.xi = object()
+        ch.physical_holds = xtest.Channel.physical_holds.__get__(ch)
+        ch.xi_devices = lambda: [
+            {"id": 2, "use": 1, "enabled": True, "name": "core master"},
+            {"id": 5, "use": 4, "enabled": True, "name": "Virtual core XTEST keyboard"},
+            {"id": 9, "use": 4, "enabled": True, "name": "physical keyboard"},
+            {"id": 10, "use": 3, "enabled": True, "name": "physical pointer"}]
+        queried = []
+        ch.device_state = lambda did: queried.append(did) or {"keys": [37] if did == 9 else [], "buttons": [1] if did == 10 else []}
+        assert ch.physical_holds() == {"keys": [37], "buttons": [1]}
+        assert queried == [9, 10]
+
+
+def test_failed_xtest_query_cannot_be_reported_as_empty_verified(ch):
+    ch.xtest_device_ids = lambda: {5}
+    ch.device_state = lambda did: (_ for _ in ()).throw(xtest.ChannelError("device query failed"))
+    with pytest.raises(xtest.ChannelError, match="device query failed"):
+        ch.xtest_held()

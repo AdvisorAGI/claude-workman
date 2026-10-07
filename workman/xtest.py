@@ -30,6 +30,7 @@ import ctypes
 import ctypes.util
 import io
 import os
+import select
 import threading
 import time
 
@@ -44,6 +45,9 @@ MappingNotify = 34
 LSBFirst = 0
 NoSymbol = 0
 KeyPress = 2
+PropertyNotify = 28
+PropertyChangeMask = 1 << 22
+SubstructureMask = (1 << 19) | (1 << 20)
 
 # XInput2
 XIAllDevices = 0
@@ -129,9 +133,21 @@ class XGenericEventCookie(ctypes.Structure):
     ]
 
 
+class XPropertyEvent(ctypes.Structure):
+    _fields_ = [("type", ctypes.c_int), ("serial", ctypes.c_ulong),
+                ("send_event", ctypes.c_int), ("display", ctypes.c_void_p),
+                ("window", ctypes.c_ulong), ("atom", ctypes.c_ulong),
+                ("time", ctypes.c_ulong), ("state", ctypes.c_int)]
+
+
 class XEvent(ctypes.Union):
-    _fields_ = [("type", ctypes.c_int), ("xcookie", XGenericEventCookie),
+    _fields_ = [("type", ctypes.c_int), ("xcookie", XGenericEventCookie), ("xproperty", XPropertyEvent),
                 ("pad", ctypes.c_long * 24)]
+
+
+class XIValuatorState(ctypes.Structure):
+    _fields_ = [("mask_len", ctypes.c_int), ("mask", ctypes.POINTER(ctypes.c_ubyte)),
+                ("values", ctypes.POINTER(ctypes.c_double))]
 
 
 class XIRawEvent(ctypes.Structure):
@@ -141,7 +157,8 @@ class XIRawEvent(ctypes.Structure):
         ("extension", ctypes.c_int), ("evtype", ctypes.c_int),
         ("time", ctypes.c_ulong), ("deviceid", ctypes.c_int),
         ("sourceid", ctypes.c_int), ("detail", ctypes.c_int),
-        ("flags", ctypes.c_int),
+        ("flags", ctypes.c_int), ("valuators", XIValuatorState),
+        ("raw_values", ctypes.POINTER(ctypes.c_double)),
     ]
 
 
@@ -281,12 +298,18 @@ class Channel:
             x.XFreeModifiermap.argtypes = [P(XModifierKeymap)]
         x.XFree.argtypes = [vp]
         x.XGetInputFocus.argtypes = [vp, P(cul), P(ci)]; x.XGetInputFocus.restype = ci
-        x.XSetInputFocus.argtypes = [vp, cul, ci, cul]
         x.XQueryKeymap.argtypes = [vp, ctypes.POINTER(ctypes.c_char)]
         x.XGetImage.argtypes = [vp, cul, ci, ci, cu, cu, cul, ci]
         x.XGetImage.restype = P(XImage)
         x.XInternAtom.argtypes = [vp, ctypes.c_char_p, ci]; x.XInternAtom.restype = cul
         x.XSendEvent.argtypes = [vp, cul, ci, ctypes.c_long, vp]; x.XSendEvent.restype = ci
+        x.XCreateSimpleWindow.argtypes = [vp, cul, ci, ci, cu, cu, cu, cul, cul]
+        x.XCreateSimpleWindow.restype = cul
+        x.XDestroyWindow.argtypes = [vp, cul]
+        x.XSelectInput.argtypes = [vp, cul, ctypes.c_long]
+        x.XChangeProperty.argtypes = [vp, cul, cul, cul, ci, ci, vp, ci]
+        x.XCheckWindowEvent.argtypes = [vp, cul, ctypes.c_long, P(XEvent)]
+        x.XCheckWindowEvent.restype = ci
         x.XGetGeometry.argtypes = [vp, cul, P(cul), P(ci), P(ci), P(cu), P(cu), P(cu), P(cu)]
         x.XGetGeometry.restype = ci
         x.XTranslateCoordinates.argtypes = [vp, cul, cul, ci, ci, P(ci), P(ci), P(cul)]
@@ -371,6 +394,8 @@ class Channel:
             if dpy and not self.dead:
                 try:
                     self._revert_scratch()
+                    if getattr(self, "_time_window", 0):
+                        self.x11.XDestroyWindow(dpy, self._time_window)
                     self.x11.XCloseDisplay(dpy)
                 except Exception:
                     pass
@@ -387,6 +412,85 @@ class Channel:
 
     def fileno(self) -> int:
         return self.x11.XConnectionNumber(self.dpy)
+
+    def server_time(self) -> int:
+        """Fresh, nonzero X server time from PropertyNotify on our unmapped window.
+
+        Unix/monotonic milliseconds are not X timestamps. This changes only a
+        property on a window this connection owns; no focus or input is sent.
+        """
+        with self.lock:
+            self._check()
+            if not getattr(self, "_time_window", 0):
+                self._time_window = self.x11.XCreateSimpleWindow(self.dpy, self.root, -1, -1, 1, 1, 0, 0, 0)
+                if not self._time_window:
+                    raise ChannelError("cannot obtain X server time")
+                self.x11.XSelectInput(self.dpy, self._time_window, PropertyChangeMask)
+            atom = self._atom("_WORKMAN_SERVER_TIME")
+            ev = XEvent()
+            # Consume previous notifications before issuing the new marker.
+            while self.x11.XCheckWindowEvent(self.dpy, self._time_window, PropertyChangeMask, ctypes.byref(ev)):
+                pass
+            marker = ctypes.c_ubyte(1)
+            self.x11.XChangeProperty(self.dpy, self._time_window, atom, atom, 8, 0, ctypes.byref(marker), 1)
+            self.x11.XFlush(self.dpy)
+            deadline = time.monotonic() + 0.5
+            while True:
+                if self.x11.XCheckWindowEvent(self.dpy, self._time_window, PropertyChangeMask, ctypes.byref(ev)):
+                    timestamp = int(ev.xproperty.time) & 0xffffffff
+                    if ev.type == PropertyNotify and ev.xproperty.atom == atom and timestamp:
+                        return timestamp
+                remaining = deadline - time.monotonic()
+                if remaining <= 0:
+                    raise ChannelError("X server timestamp unavailable")
+                select.select([self.fileno()], [], [], min(0.02, remaining))
+
+    def _emit(self, kind: str, detail: int, down: bool, send, *, position=None) -> None:
+        """One exact claim. Bookkeeping failures cannot prevent safe key/button UP."""
+        from . import owner_pause, polite, polite_state
+        claim = None
+        def bookkeeping_error(exc):
+            errors = self.__dict__.setdefault("_claim_errors", [])
+            errors.append(str(exc))
+            del errors[:-128]
+            if polite.current() is not None:
+                polite.current().report["claim_errors"] = list(errors)
+        claimable = polite.current() is not None or polite_state.display_key(self.display_name).split(".")[0] == ":0"
+        if claimable:
+            try:
+                claim = owner_pause.claim_agent_event(self.display_name, kind, detail, self.server_time(), position=position)
+            except Exception as exc:
+                if down:
+                    raise  # Never press without attribution on the shared desk.
+                bookkeeping_error(exc)  # Physical-safe releases take priority.
+        try:
+            if down:
+                polite.guard("key_down" if kind.startswith("key") else "move" if kind == "motion" else "mouse_down")
+                if kind.startswith("key"):
+                    polite.keyboard_guard()
+            if send() == 0:
+                raise ChannelError("input injection failed")
+            # Track an acknowledged request before any post-send round-trip.
+            held_kind = "keys" if kind.startswith("key") else "buttons" if kind.startswith("button") else None
+            if held_kind is not None:
+                held = self.__dict__.setdefault("_agent_" + held_kind, set())
+                (held.add if down else held.discard)(detail)
+            self.x11.XSync(self.dpy, 0)
+        except BaseException:
+            if claim is not None:
+                try:
+                    owner_pause.finish_agent_event(self.display_name, claim, None)
+                except Exception as exc:
+                    bookkeeping_error(exc)
+            raise
+        else:
+            if claim is not None:
+                try:
+                    owner_pause.finish_agent_event(self.display_name, claim, self.server_time())
+                except Exception as exc:
+                    # The request completed; preserve progress and the bounded
+                    # single-event claim, which expires instead of widening.
+                    bookkeeping_error(exc)
 
     # ---- see ----------------------------------------------------------------
     def screen_size(self) -> tuple[int, int]:
@@ -465,7 +569,9 @@ class Channel:
             self._check()
             self._settle_releases()
             polite.guard("move")
-            self.xtst.XTestFakeMotionEvent(self.dpy, self.screen, int(x), int(y), CurrentTime)
+            self._emit("motion", 0, True,
+                       lambda: self.xtst.XTestFakeMotionEvent(self.dpy, self.screen, int(x), int(y), CurrentTime),
+                       position=(int(x), int(y)))
             self.flush()
             polite.placed(x, y)
 
@@ -500,25 +606,11 @@ class Channel:
         return bool(getattr(self, "_agent_keys", set()) or getattr(self, "_agent_buttons", set()))
 
     def release_owned(self) -> dict:
-        """Release this connection's recorded presses, never shared XTEST state."""
-        errors = []
-        released = {"keys": [], "buttons": []}
-        with self.lock:
-            for code in list(getattr(self, "_agent_keys", set())):
-                try:
-                    self._fake_key(code, False)
-                    released["keys"].append(code)
-                except Exception as exc:
-                    errors.append(str(exc))
-            for button in list(getattr(self, "_agent_buttons", set())):
-                try:
-                    self.button(button, False)
-                    released["buttons"].append(button)
-                except Exception as exc:
-                    errors.append(str(exc))
-            self.flush()
-        return {"ok": not errors, "released": released, "errors": errors,
-                "still_owned": self.owned_holds()}
+        """Interruption releases queried XTEST state, including missed tracking."""
+        out = self.release_xtest_held()
+        out["released"] = {"keys": out["released_keys"], "buttons": out["released_buttons"]}
+        out["still_owned"] = self.owned_holds()
+        return out
 
     def button(self, button: int, down: bool) -> bool:
         from . import polite
@@ -533,15 +625,17 @@ class Channel:
                         return False
                     if button in self.pointer_position().get("buttons", []):
                         polite.foreign_hold(button=button, detail="button already held by another input source")
-                elif button not in owned:
+                elif button not in owned and button not in self.xtest_held()["buttons"]:
                     return False
+            if not down and button in self.physical_holds()["buttons"]:
+                return False
             if down:
                 polite.guard("mouse_down")
                 if int(button) <= 3:
+                    polite.target_pointer()
                     polite.may_change_focus()
-            status = self.xtst.XTestFakeButtonEvent(self.dpy, int(button), 1 if down else 0, CurrentTime)
-            if status == 0:
-                raise ChannelError("button injection failed")
+            self._emit("button_press" if down else "button_release", int(button), down,
+                       lambda: self.xtst.XTestFakeButtonEvent(self.dpy, int(button), 1 if down else 0, CurrentTime))
             if down:
                 owned.add(button)
             else:
@@ -711,14 +805,15 @@ class Channel:
                     return False
                 if keycode in self.core_keys_down():
                     polite.foreign_hold(keycode=keycode, detail="key already held by another input source")
-            elif keycode not in owned:
+            elif keycode not in owned and keycode not in self.xtest_held()["keys"]:
                 return False
+        if not down and keycode in self.physical_holds()["keys"]:
+            return False
         if down:
             polite.guard("key_down")
             polite.may_change_focus()
-        status = self.xtst.XTestFakeKeyEvent(self.dpy, int(keycode), 1 if down else 0, CurrentTime)
-        if status == 0:
-            raise ChannelError("key injection failed")
+        self._emit("key_press" if down else "key_release", int(keycode), down,
+                   lambda: self.xtst.XTestFakeKeyEvent(self.dpy, int(keycode), 1 if down else 0, CurrentTime))
         if down:
             owned.add(keycode)
         else:
@@ -728,7 +823,7 @@ class Channel:
         return True
 
     def key(self, name: str, down: bool) -> bool:
-        """Press/release one key; polite releases must belong to this connection."""
+        """Press/release one key; releases preserve physical holds."""
         with self.lock:
             self._check()
             sym = self.keysym(name)
@@ -837,12 +932,14 @@ class Channel:
                               ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
                               ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)), ctypes.POINTER(ctypes.c_uint)]
             query.restype = ctypes.c_int
-            first = None
-            for _ in range(16):
+            clients = set(self._client_ids("_NET_CLIENT_LIST"))
+            ancestor = None
+            for _ in range(32):
                 info = self._identity(wid)
-                first = first or info
-                if info.get("class"):
+                if wid in clients or (not clients and self._property(wid, "WM_STATE") is not None):
                     return info
+                if info.get("class"):
+                    ancestor = info
                 root, parent, count = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_uint()
                 children = ctypes.POINTER(ctypes.c_ulong)()
                 valid = query(self.dpy, wid, ctypes.byref(root), ctypes.byref(parent),
@@ -852,20 +949,52 @@ class Channel:
                 if not valid or parent.value in (0, self.root, wid):
                     break
                 wid = parent.value
-            return first or {"ok": False, "error": "focus identity unavailable"}
+            # With an EWMH list, unlisted children/frames are not clients. Without
+            # one, retain the outermost class-bearing ancestor as legacy fallback.
+            return ancestor if not clients and ancestor else {"ok": False, "error": "focus identity unavailable"}
+
+    def top_level_focus(self) -> dict:
+        """Actual keyboard focus resolved to a WM client, rather than a child."""
+        identity = self.focused_window_identity()
+        if identity.get("ok"):
+            return dict(identity, window=int(identity["id"]))
+        return identity
 
     def restore_input_focus(self, focus: dict) -> dict:
-        """Set keyboard focus without raising; report the actual readback."""
+        """EWMH pager activation with fresh server time and top-level readback.
+
+        https://specifications.freedesktop.org/wm/1.5/ar01s03.html
+        No bare XSetInputFocus fallback: a rejecting WM is a reported failure.
+        """
+        from . import polite
         with self.lock:
             self._check()
-            from . import polite
-            polite.may_change_focus()
             self.last_error = None
-            self.x11.XSetInputFocus(self.dpy, int(focus["window"]), int(focus.get("revert_to", 1)), CurrentTime)
-            self.x11.XSync(self.dpy, 0)
-            readback = self.input_focus()
-            return {"ok": not self.last_error and readback["window"] == int(focus["window"]),
-                    "requested": focus, "readback": readback, "error": self.last_error}
+            timestamp = self.server_time()
+            if not timestamp:
+                return {"ok": False, "error": "restore_failed", "detail": "nonzero X timestamp required"}
+            before = self.top_level_focus()
+            ev = XClientMessageEvent()
+            ev.type, ev.display, ev.window = ClientMessage, self.dpy, int(focus["window"])
+            ev.message_type, ev.format = self._atom("_NET_ACTIVE_WINDOW"), 32
+            ev.data[0], ev.data[1], ev.data[2] = 2, timestamp, int(before.get("window") or 0)
+            # The timestamp round-trip may have let owner input arrive.
+            polite.guard("focus_window")
+            polite.may_change_focus()
+            sent = self.x11.XSendEvent(self.dpy, self.root, 0, SubstructureMask, ctypes.byref(ev))
+            self.x11.XFlush(self.dpy)
+            deadline = time.monotonic() + 0.3
+            while True:
+                self.x11.XSync(self.dpy, 0)
+                readback = self.top_level_focus()
+                matched = readback.get("ok") and readback.get("window") == int(focus["window"])
+                if matched or not sent or self.last_error or time.monotonic() >= deadline:
+                    break
+                polite.sleep(0.01)
+            ok = bool(sent and matched and not self.last_error)
+            return {"ok": ok, "requested": focus, "readback": readback,
+                    "timestamp": timestamp, "source": 2, "error": None if ok else "restore_failed",
+                    "detail": self.last_error}
 
     # ---- window facts (EWMH, no subprocess) -----------------------------------
     def _atom(self, name: str) -> int:
@@ -1053,27 +1182,59 @@ class Channel:
     def xtest_held(self) -> dict:
         """What the XTEST devices (every agent's input) are holding right now."""
         keys: set[int] = set(); buttons: set[int] = set()
-        for did in sorted(self.xtest_device_ids()):
-            try:
-                st = self.device_state(did)
-            except ChannelError:
-                continue
+        devices = self.xtest_device_ids()
+        if not devices:
+            raise ChannelError("XTEST device state unavailable")
+        for did in sorted(devices):
+            st = self.device_state(did)  # Failure is not an empty/verified state.
             keys.update(st["keys"]); buttons.update(st["buttons"])
         return {"keys": sorted(keys), "buttons": sorted(buttons)}
 
+    def physical_holds(self) -> dict:
+        """Query enabled physical slaves, never the merged master keymap."""
+        if self.xi is None:
+            raise ChannelError("physical device queries unavailable")
+        keys, buttons = set(), set()
+        for device in self.xi_devices():
+            if device["enabled"] and device["use"] in (3, 4) and "XTEST" not in device["name"]:
+                state = self.device_state(device["id"])
+                keys.update(state["keys"])
+                buttons.update(state["buttons"])
+        return {"keys": sorted(keys), "buttons": sorted(buttons)}
+
     def release_xtest_held(self) -> dict:
-        """Let go of every key and button the XTEST devices hold. The owner's
-        physical keys are a different device and are never touched."""
-        held = self.xtest_held()
+        """Release ALL queried XTEST holds while preserving physical overlaps.
+
+        Query errors fail closed: no speculative releases of the owner's keys.
+        """
         with self.lock:
-            for code in held["keys"]:
-                self._fake_key(code, False)
-            for b in held["buttons"]:
-                self.xtst.XTestFakeButtonEvent(self.dpy, b, 0, CurrentTime)
+            claim_error_start = len(getattr(self, "_claim_errors", []))
+            held = self.xtest_held()
+            released = {"keys": [], "buttons": []}
+            skipped = {"keys": [], "buttons": []}
+            errors = []
+            for kind in ("keys", "buttons"):
+                for code in sorted(set(held[kind]) | getattr(self, "_agent_" + kind, set())):
+                    try:
+                        if code in self.physical_holds()[kind]:
+                            skipped[kind].append(code)
+                            continue
+                        event_kind = "key_release" if kind == "keys" else "button_release"
+                        fn = self.xtst.XTestFakeKeyEvent if kind == "keys" else self.xtst.XTestFakeButtonEvent
+                        self._emit(event_kind, code, False,
+                                   lambda fn=fn, code=code: fn(self.dpy, code, 0, CurrentTime))
+                        self.__dict__.setdefault("_agent_" + kind, set()).discard(code)
+                        self.__dict__.setdefault("_released_" + kind, {})[code] = time.monotonic() + 0.05
+                        released[kind].append(code)
+                    except Exception as exc:
+                        errors.append(str(exc))
             self.flush()
-        after = self.xtest_held()
-        return {"released_keys": held["keys"], "released_buttons": held["buttons"],
-                "still_held": after}
+            after = self.xtest_held()
+            verified = not after["keys"] and not after["buttons"] and not self.owned_holds()
+            return {"ok": not errors and verified, "verified": verified,
+                    "released_keys": released["keys"], "released_buttons": released["buttons"],
+                    "skipped_physical": skipped, "still_held": after, "errors": errors,
+                    "bookkeeping_errors": getattr(self, "_claim_errors", [])[claim_error_start:]}
 
     def keycode_names(self, codes: list[int]) -> list[str]:
         out = []
@@ -1181,8 +1342,18 @@ class Channel:
             kind = XI_RAW_KINDS.get(raw.evtype)
             if kind is None:
                 return None
-            return {"kind": kind, "source": raw.sourceid, "device": raw.deviceid,
-                    "detail": raw.detail, "time": raw.time}
+            event = {"kind": kind, "source": raw.sourceid, "device": raw.deviceid,
+                     "detail": raw.detail, "time": raw.time}
+            if kind == "motion" and raw.raw_values and raw.valuators.mask:
+                values = {}
+                index = 0
+                for axis in range(min(32, raw.valuators.mask_len) * 8):
+                    if raw.valuators.mask[axis >> 3] & (1 << (axis & 7)):
+                        values[axis] = float(raw.raw_values[index])
+                        index += 1
+                if 0 in values and 1 in values:
+                    event["position"] = [values[0], values[1]]
+            return event
         finally:
             self.x11.XFreeEventData(self.dpy, ctypes.byref(ev.xcookie))
 

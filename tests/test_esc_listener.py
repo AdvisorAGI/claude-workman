@@ -17,8 +17,8 @@ PHYSICAL, XTEST = 9, 5
 
 
 def watcher(claims_escape=False, claims_input=False):
-    def claims(escape=False):
-        return claims_escape if escape else claims_input
+    def claims(event):
+        return claims_escape if event.get("detail") == ESC and event.get("kind") == "key_press" else claims_input
     return esc_pause.RawInputWatcher(injected={XTEST}, claims=claims)
 
 

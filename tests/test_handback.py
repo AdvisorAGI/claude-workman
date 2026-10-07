@@ -301,7 +301,7 @@ class TestHandBack:
         out = server.hand_back()
         assert out["clean"] is True and out["ok"] is True
         assert out["checks"] == {"nothing_held_by_agent": True, "our_windows_closed": True,
-                                 "pointer_parked": True, "screen_on": True, "no_grab": True}
+                                 "pointer_parked": True, "screen_on": True, "polite_restore": True, "no_grab": True}
         assert out["released"]["xtest"]["released_keys"] == [50]
         assert out["screen"]["on"] is True and ch.woke == 1
         assert out["verify"]["active_window"]["name"] == "owner's editor"
