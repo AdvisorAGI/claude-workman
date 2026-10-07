@@ -68,10 +68,14 @@ def test_resume_does_not_repeat_completed_clicks_or_key():
 
 def test_focus_identity_follows_real_input_child_to_client(seat, monkeypatch):
     seat.ch.input_focus = lambda: {"ok": True, "window": 101, "revert_to": 1}
+    seat.ch._client_ids = lambda name: [100] if name == "_NET_CLIENT_LIST" else []
     seat.ch._identity = lambda wid: {"ok": True, "id": wid,
                                     "class": "Remmina" if wid == 100 else ""}
     def tree(dpy, wid, root, parent, children, count):
-        ctypes.cast(parent, ctypes.POINTER(ctypes.c_ulong))[0] = 100
+        ctypes.cast(root, ctypes.POINTER(ctypes.c_ulong))[0] = seat.ch.root
+        ctypes.cast(parent, ctypes.POINTER(ctypes.c_ulong))[0] = {101: 100, 100: seat.ch.root}[wid]
+        ctypes.cast(count, ctypes.POINTER(ctypes.c_uint))[0] = 0
         return 1
     monkeypatch.setattr(seat.ch.x11, "XQueryTree", tree, raising=False)
-    assert seat.ch.focused_window_identity()["class"] == "Remmina"
+    identity = seat.ch.focused_window_identity()
+    assert identity["id"] == 100 and identity["class"] == "Remmina"
