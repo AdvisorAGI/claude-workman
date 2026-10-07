@@ -280,6 +280,8 @@ class Channel:
         if hasattr(x, "XFreeModifiermap"):
             x.XFreeModifiermap.argtypes = [P(XModifierKeymap)]
         x.XFree.argtypes = [vp]
+        x.XGetInputFocus.argtypes = [vp, P(cul), P(ci)]; x.XGetInputFocus.restype = ci
+        x.XSetInputFocus.argtypes = [vp, cul, ci, cul]
         x.XQueryKeymap.argtypes = [vp, ctypes.POINTER(ctypes.c_char)]
         x.XGetImage.argtypes = [vp, cul, ci, ci, cu, cu, cul, ci]
         x.XGetImage.restype = P(XImage)
@@ -377,6 +379,11 @@ class Channel:
 
     def flush(self) -> None:
         self.x11.XFlush(self.dpy)
+        from . import polite
+        if polite.current() is not None:
+            # Complete this request batch before the next ownership query.
+            # Otherwise a just-released key/wheel may still look foreign.
+            self.x11.XSync(self.dpy, 0)
 
     def fileno(self) -> int:
         return self.x11.XConnectionNumber(self.dpy)
@@ -453,16 +460,96 @@ class Channel:
 
     # ---- pointer ------------------------------------------------------------
     def move(self, x: int, y: int) -> None:
+        from . import polite
         with self.lock:
             self._check()
+            self._settle_releases()
+            polite.guard("move")
             self.xtst.XTestFakeMotionEvent(self.dpy, self.screen, int(x), int(y), CurrentTime)
             self.flush()
+            polite.placed(x, y)
 
-    def button(self, button: int, down: bool) -> None:
+    def _unowned(self, kind: str, down: set) -> set:
+        pending = self.__dict__.setdefault("_released_" + kind, {})
+        now = time.monotonic()
+        for code, deadline in list(pending.items()):
+            if code not in down or now >= deadline:
+                pending.pop(code, None)
+        return down - getattr(self, "_agent_" + kind, set()) - pending.keys()
+
+    def _settle_releases(self) -> None:
+        """Wait for this connection's queued releases before another press.
+
+        XTEST delivery can lag its request reply. Pending releases are never
+        sent again, and after 50ms any still-down input is treated as foreign.
+        """
+        from . import polite
+        if polite.current() is None:
+            return
+        while getattr(self, "_released_keys", {}) or getattr(self, "_released_buttons", {}):
+            polite.guard()  # observes releases and owner stamps; never injects
+            if getattr(self, "_released_keys", {}) or getattr(self, "_released_buttons", {}):
+                time.sleep(0.001)
+
+    def foreign_holds(self) -> dict:
+        keys = self._unowned("keys", set(self.core_keys_down()))
+        buttons = self._unowned("buttons", set(self.pointer_position().get("buttons", [])))
+        return {"keys": sorted(keys), "buttons": sorted(buttons)} if keys or buttons else {}
+
+    def owned_holds(self) -> bool:
+        return bool(getattr(self, "_agent_keys", set()) or getattr(self, "_agent_buttons", set()))
+
+    def release_owned(self) -> dict:
+        """Release this connection's recorded presses, never shared XTEST state."""
+        errors = []
+        released = {"keys": [], "buttons": []}
+        with self.lock:
+            for code in list(getattr(self, "_agent_keys", set())):
+                try:
+                    self._fake_key(code, False)
+                    released["keys"].append(code)
+                except Exception as exc:
+                    errors.append(str(exc))
+            for button in list(getattr(self, "_agent_buttons", set())):
+                try:
+                    self.button(button, False)
+                    released["buttons"].append(button)
+                except Exception as exc:
+                    errors.append(str(exc))
+            self.flush()
+        return {"ok": not errors, "released": released, "errors": errors,
+                "still_owned": self.owned_holds()}
+
+    def button(self, button: int, down: bool) -> bool:
+        from . import polite
         with self.lock:
             self._check()
-            self.xtst.XTestFakeButtonEvent(self.dpy, int(button), 1 if down else 0, CurrentTime)
+            owned = self.__dict__.setdefault("_agent_buttons", set())
+            if polite.current() is not None:
+                if down:
+                    self._settle_releases()
+                    polite.guard("mouse_down")
+                    if button in owned:
+                        return False
+                    if button in self.pointer_position().get("buttons", []):
+                        polite.foreign_hold(button=button, detail="button already held by another input source")
+                elif button not in owned:
+                    return False
+            if down:
+                polite.guard("mouse_down")
+                if int(button) <= 3:
+                    polite.may_change_focus()
+            status = self.xtst.XTestFakeButtonEvent(self.dpy, int(button), 1 if down else 0, CurrentTime)
+            if status == 0:
+                raise ChannelError("button injection failed")
+            if down:
+                owned.add(button)
+            else:
+                owned.discard(button)
+                if polite.current() is not None:
+                    self.__dict__.setdefault("_released_buttons", {})[button] = time.monotonic() + 0.05
             self.flush()
+            return True
 
     def click(self, x: int | None, y: int | None, button: int = 1, count: int = 1,
               gap_ms: int = 12) -> None:
@@ -612,23 +699,48 @@ class Channel:
             return int(code), 0
         return self._scratch_keycode(sym), 0
 
-    def _fake_key(self, keycode: int, down: bool) -> None:
-        self.xtst.XTestFakeKeyEvent(self.dpy, int(keycode), 1 if down else 0, CurrentTime)
+    def _fake_key(self, keycode: int, down: bool) -> bool:
+        from . import polite
+        self._check()
+        owned = self.__dict__.setdefault("_agent_keys", set())
+        if polite.current() is not None:
+            if down:
+                self._settle_releases()
+                polite.guard("key_down")
+                if keycode in owned:
+                    return False
+                if keycode in self.core_keys_down():
+                    polite.foreign_hold(keycode=keycode, detail="key already held by another input source")
+            elif keycode not in owned:
+                return False
+        if down:
+            polite.guard("key_down")
+            polite.may_change_focus()
+        status = self.xtst.XTestFakeKeyEvent(self.dpy, int(keycode), 1 if down else 0, CurrentTime)
+        if status == 0:
+            raise ChannelError("key injection failed")
+        if down:
+            owned.add(keycode)
+        else:
+            owned.discard(keycode)
+            if polite.current() is not None:
+                self.__dict__.setdefault("_released_keys", {})[keycode] = time.monotonic() + 0.05
+        return True
 
-    def key(self, name: str, down: bool) -> None:
-        """Press or release one key by xdotool name ('ctrl', 'Return', 'a')."""
+    def key(self, name: str, down: bool) -> bool:
+        """Press/release one key; polite releases must belong to this connection."""
         with self.lock:
             self._check()
             sym = self.keysym(name)
             if not sym:
                 raise ChannelError(f"unknown key {name!r}")
             code, level = self.keycode_for(sym)
-            self._fake_key(code, down)
+            changed = self._fake_key(code, down)
             self.flush()
+            return changed
 
     def press_combo(self, combo: str, hold_ms: int = 0) -> list[str]:
-        """xdotool `key` semantics: modifiers down in order, base key tap,
-        modifiers up in reverse. Returns the resolved key names."""
+        from . import polite
         names = parse_combo(combo)
         with self.lock:
             self._check()
@@ -642,18 +754,20 @@ class Channel:
             held = []
             try:
                 for _n, (code, _lvl) in mods:
-                    self._fake_key(code, True)
-                    held.append(code)
-                shift = None
+                    if self._fake_key(code, True):
+                        held.append(code)
                 if blevel == 1 and not any(n in ("Shift_L", "Shift_R") for n, _ in mods):
                     shift = self.keycode_for(self.keysym("Shift_L"))[0]
-                    self._fake_key(shift, True)
-                    held.append(shift)
-                self._fake_key(bcode, True)
+                    if self._fake_key(shift, True):
+                        held.append(shift)
+                if self._fake_key(bcode, True):
+                    held.append(bcode)
+                elif polite.current() is not None:
+                    raise polite.Interrupted({"ok": False, "error": "already_held", "key": base})
+                polite.progress(key=combo, pressed=True)
                 self.flush()
                 if hold_ms:
-                    time.sleep(hold_ms / 1000.0)
-                self._fake_key(bcode, False)
+                    polite.sleep(hold_ms / 1000.0)
             finally:
                 for code in reversed(held):
                     self._fake_key(code, False)
@@ -670,35 +784,88 @@ class Channel:
         return not self.x11.XKeysymToKeycode(self.dpy, sym)
 
     def type_text(self, text: str, delay_ms: int = 0, dwell_ms: int = 0) -> int:
-        """Type characters one keysym at a time. Returns the count typed.
-
-        dwell_ms keeps each key down before the release (a real keystroke is
-        not zero-length); delay_ms is the gap after the release. Capitals and
-        shifted symbols are typed with a real Shift press around the key.
-        """
+        """Type one character at a time with interruptible flight and dwell."""
+        from . import polite
         typed = 0
-        shift_code = None
         with self.lock:
             self._check()
-            for ch in text:
-                sym = keysym_for_char(ch)
+            for char in text:
+                polite.guard("type_text")
+                sym = keysym_for_char(char)
                 code, level = self.keycode_for(sym)
-                if level == 1:
-                    if shift_code is None:
+                held = []
+                try:
+                    if level == 1:
                         shift_code = self.keycode_for(self.keysym("Shift_L"))[0]
-                    self._fake_key(shift_code, True)
-                self._fake_key(code, True)
-                self.flush()
-                if dwell_ms > 0:
-                    time.sleep(dwell_ms / 1000.0)
-                self._fake_key(code, False)
-                if level == 1:
-                    self._fake_key(shift_code, False)
-                self.flush()
-                typed += 1
+                        if self._fake_key(shift_code, True):
+                            held.append(shift_code)
+                    if self._fake_key(code, True):
+                        held.append(code)
+                    elif polite.current() is not None:
+                        raise polite.Interrupted({"ok": False, "error": "already_held", "keycode": code})
+                    typed += 1
+                    polite.progress(typed_len=typed, total_len=len(text), remaining=text[typed:])
+                    self.flush()
+                    if dwell_ms > 0:
+                        polite.sleep(dwell_ms / 1000.0)
+                finally:
+                    for held_code in reversed(held):
+                        self._fake_key(held_code, False)
+                    self.flush()
                 if delay_ms > 0:
-                    time.sleep(delay_ms / 1000.0)
+                    polite.sleep(delay_ms / 1000.0)
         return typed
+
+    def input_focus(self) -> dict:
+        with self.lock:
+            self._check()
+            window = ctypes.c_ulong(); revert = ctypes.c_int()
+            self.x11.XGetInputFocus(self.dpy, window, revert)
+            return {"ok": True, "window": window.value, "revert_to": revert.value}
+
+    def focused_window_identity(self) -> dict:
+        """Resolve the actual keyboard-focus client, including child windows.
+
+        EWMH's active client can lag or differ after a no-raise focus request.
+        """
+        with self.lock:
+            wid = self.input_focus()["window"]
+            if wid in (0, 1, self.root):
+                return {"ok": False, "error": "no focused client"}
+            query = self.x11.XQueryTree
+            query.argtypes = [ctypes.c_void_p, ctypes.c_ulong,
+                              ctypes.POINTER(ctypes.c_ulong), ctypes.POINTER(ctypes.c_ulong),
+                              ctypes.POINTER(ctypes.POINTER(ctypes.c_ulong)), ctypes.POINTER(ctypes.c_uint)]
+            query.restype = ctypes.c_int
+            first = None
+            for _ in range(16):
+                info = self._identity(wid)
+                first = first or info
+                if info.get("class"):
+                    return info
+                root, parent, count = ctypes.c_ulong(), ctypes.c_ulong(), ctypes.c_uint()
+                children = ctypes.POINTER(ctypes.c_ulong)()
+                valid = query(self.dpy, wid, ctypes.byref(root), ctypes.byref(parent),
+                              ctypes.byref(children), ctypes.byref(count))
+                if children:
+                    self.x11.XFree(children)
+                if not valid or parent.value in (0, self.root, wid):
+                    break
+                wid = parent.value
+            return first or {"ok": False, "error": "focus identity unavailable"}
+
+    def restore_input_focus(self, focus: dict) -> dict:
+        """Set keyboard focus without raising; report the actual readback."""
+        with self.lock:
+            self._check()
+            from . import polite
+            polite.may_change_focus()
+            self.last_error = None
+            self.x11.XSetInputFocus(self.dpy, int(focus["window"]), int(focus.get("revert_to", 1)), CurrentTime)
+            self.x11.XSync(self.dpy, 0)
+            readback = self.input_focus()
+            return {"ok": not self.last_error and readback["window"] == int(focus["window"]),
+                    "requested": focus, "readback": readback, "error": self.last_error}
 
     # ---- window facts (EWMH, no subprocess) -----------------------------------
     def _atom(self, name: str) -> int:

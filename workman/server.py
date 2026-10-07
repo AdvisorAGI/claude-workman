@@ -114,7 +114,20 @@ def _input(name: str, args: dict, run) -> dict:
     if refused is not None:
         return refused
     handback.note_pointer_before()
-    result = run()
+    # One scope spans compound human actions (including modifier-click), so
+    # owner state is restored once, after the complete tool burst.
+    from . import polite
+    # Toolkit/extension mutations also use this entry point but may not call a
+    # desktop primitive. Preserve the initial owner gate with polite mode off.
+    if not polite.enabled() and polite.gate_enabled(desktop.active()):
+        gate_action = name if name in owner_pause.INPUT_ACTIONS else "focus_window"
+        if owner_pause.blocked(gate_action):
+            return owner_pause.refusal(name)
+        if owner_pause.human_active() and owner_pause.wait_for_human_quiet():
+            return owner_pause.refusal(name, error="human_active")
+        if owner_pause.blocked(gate_action):
+            return owner_pause.refusal(name)
+    result = polite.run(name, run)
     botsafety.after(name, result)
     return resume.remember(name, args, result)
 
@@ -654,7 +667,8 @@ def press_key(key: str) -> dict:
     'super+l', 'KP_0'."""
     def run():
         if human.enabled() and key.lower() in {"return", "enter", "kp_enter"}:
-            time.sleep(human.enter_delay_ms() / 1000.0)
+            from . import polite
+            polite.sleep(human.enter_delay_ms() / 1000.0)
         if human.enabled():
             return desktop.press_key(key, hold_ms=human.key_dwell_ms())
         return desktop.press_key(key)
@@ -859,7 +873,8 @@ def chrome_activate_tab(match: str) -> dict:
     """Activate the first tab whose title or URL contains `match`. Uses
     CDP /json/activate when available; otherwise walks ctrl+Tab reading the
     window title."""
-    return chrome.activate_tab(match)
+    return _input("chrome_activate_tab", {"match": match},
+                  lambda: chrome.activate_tab(match))
 
 
 @mcp.tool()
@@ -979,19 +994,32 @@ def bridge_tabs_list() -> dict:
 @mcp.tool()
 def bridge_tabs_activate(tabId: int) -> dict:
     """Activate a tab by id and focus its window."""
-    return bridge.call("tabs.activate", {"tabId": tabId})
+    return _bridge_change("bridge_tabs_activate", "tabs.activate", {"tabId": tabId})
 
 
 @mcp.tool()
 def bridge_tabs_open(url: str, active: bool = True) -> dict:
     """Open a tab. url must be http(s) or file, matching the extension's allowlist."""
-    return bridge.call("tabs.open", {"url": url, "active": active})
+    return _bridge_change("bridge_tabs_open", "tabs.open", {"url": url, "active": active})
 
 
 @mcp.tool()
 def bridge_tabs_close(tabId: int) -> dict:
     """Close a tab by id."""
-    return bridge.call("tabs.close", {"tabId": tabId})
+    return _bridge_change("bridge_tabs_close", "tabs.close", {"tabId": tabId})
+
+
+def _bridge_change(name: str, operation: str, args: dict) -> dict:
+    from . import polite
+
+    def run():
+        polite.guard("focus_window")
+        polite.may_change_focus()
+        result = bridge.call(operation, args)
+        polite.observe_focus()
+        return result
+
+    return _input(name, args, run)
 
 
 @mcp.tool()
@@ -1049,12 +1077,7 @@ def bridge_dom_click(tabId: int, selector: str | None = None,
         args["selector"] = selector
     if text:
         args["text"] = text
-    refused = botsafety.before("bridge_dom_click", args)
-    if refused is not None:
-        return refused
-    out = bridge.call("dom.click", args)
-    botsafety.after("bridge_dom_click", out)
-    return out
+    return _bridge_change("bridge_dom_click", "dom.click", args)
 
 
 @mcp.tool()
@@ -1065,12 +1088,7 @@ def bridge_dom_type(tabId: int, selector: str, text: str,
     Detectable. For stealth, bridge_dom_locate then type_text with Human Mode.
     """
     args = {"tabId": tabId, "selector": selector, "text": text, "clear": clear}
-    refused = botsafety.before("bridge_dom_type", args)
-    if refused is not None:
-        return refused
-    out = bridge.call("dom.type", args)
-    botsafety.after("bridge_dom_type", out)
-    return out
+    return _bridge_change("bridge_dom_type", "dom.type", args)
 
 
 @mcp.tool()
@@ -1095,7 +1113,7 @@ def bridge_page_scroll(tabId: int, x: int | None = None, y: int | None = None,
         args["dy"] = dy
     if selector:
         args["selector"] = selector
-    return bridge.call("page.scroll", args)
+    return _bridge_change("bridge_page_scroll", "page.scroll", args)
 
 
 @mcp.tool()
@@ -1462,8 +1480,15 @@ def batch(actions: list[dict], stop_on_error: bool = True) -> dict:
 
     For sequences whose outcome you already know how to verify — focus a window,
     set a field, press Return. Screenshot separately afterwards; batch returns no
-    images. Stops at the first failure unless stop_on_error=False.
+    images. Polite mode restores pointer/focus after the whole burst, so put
+    focus/click and dependent typing in the same batch. Owner interruption
+    always stops the burst, including when stop_on_error=False.
     """
+    from . import polite
+    return polite.run("batch", lambda: _batch_run(actions, stop_on_error))
+
+
+def _batch_run(actions: list[dict], stop_on_error: bool) -> dict:
     results = []
     for step, spec in enumerate(actions):
         if not isinstance(spec, dict):
@@ -1489,7 +1514,7 @@ def batch(actions: list[dict], stop_on_error: bool = True) -> dict:
         entry = outcome if isinstance(outcome, dict) else {"ok": True, "result": outcome}
         entry["action"] = name
         results.append(entry)
-        if stop_on_error and not entry.get("ok", True):
+        if resume.interrupted(entry) or (stop_on_error and not entry.get("ok", True)):
             break
     completed = sum(1 for r in results if r.get("ok", True))
     return {"ok": completed == len(actions), "completed": completed,

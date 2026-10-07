@@ -13,6 +13,8 @@ import subprocess
 import tempfile
 import time
 
+from . import polite
+
 DISPLAY = os.environ.get("WORKMAN_DISPLAY") or os.environ.get("DISPLAY") or ":0"
 
 
@@ -41,7 +43,9 @@ def _xt():
 
 def _stamp(escape: bool = False) -> None:
     from . import owner_pause
-    owner_pause.mark_agent_input(escape=escape)
+    polite.guard()
+    if polite.current() is not None or DISPLAY.split(".")[0] == ":0" or os.environ.get("WORKMAN_POLITE") == "0":
+        owner_pause.mark_agent_input(escape=escape)
 
 
 def _is_escape(key: str) -> bool:
@@ -65,11 +69,13 @@ def input_channel() -> str:
 # one thing that does reveal him moving the mouse is the pointer not being
 # where the agent left it.
 _LAST_PLACED: dict = {"at": None}
+_INPUT_HELD: dict = {"keys": set(), "buttons": set()}
 FOREIGN_MOTION_PX = 3
 
 
 def _placed(x: int, y: int) -> None:
     _LAST_PLACED["at"] = (int(x), int(y))
+    polite.placed(x, y)
 
 
 def foreign_pointer_motion(tolerance: int = FOREIGN_MOTION_PX) -> bool:
@@ -193,6 +199,15 @@ def focus_window(query: str, minimize_blockers: bool = True) -> dict:
         if not m:
             return {"ok": False, "error": f"no window matching {query!r}", "windows": [w["name"] for w in wins]}
         target = m[0]["id"]
+    if polite.current() is not None:
+        polite.guard("focus_window")
+        polite.may_change_focus()
+        ch = _xt()
+        if ch is None:
+            return {"ok": False, "error": "focus_restore_unavailable"}
+        result = ch.restore_input_focus({"window": int(target), "revert_to": 1})
+        polite.observe_focus()
+        return dict(result, target=target)
     if minimize_blockers:
         active = _run(["xdotool", "getactivewindow"]).stdout.strip()
         if active and active != target:
@@ -204,6 +219,25 @@ def focus_window(query: str, minimize_blockers: bool = True) -> dict:
 
 
 def click(x: int, y: int, button: int = 1, count: int = 1) -> dict:
+    if polite.current() is not None:
+        moved = move(x, y)
+        if not moved.get("ok"):
+            return moved
+        completed = 0
+        for i in range(max(1, int(count))):
+            polite.guard("click")
+            down = mouse_down(button)
+            if not down.get("ok"):
+                return down
+            completed += 1
+            polite.progress(clicked=[x, y], count=completed, requested_count=count,
+                            remaining_clicks=max(0, count - completed))
+            up = mouse_up(button)
+            if not up.get("ok"):
+                return up
+            if i < count - 1:
+                polite.sleep(0.012)
+        return {"ok": True, "clicked": [x, y], "button": button, "count": completed}
     emit_cursor("click", x, y)
     _stamp()
     _placed(x, y)
@@ -217,18 +251,38 @@ def click(x: int, y: int, button: int = 1, count: int = 1) -> dict:
 
 
 def move(x: int, y: int) -> dict:
-    emit_cursor("move", x, y)
     _stamp()
-    _placed(x, y)
+    emit_cursor("move", x, y)
     ch = _xt()
     if ch is not None:
         ch.move(x, y)
+        _placed(x, y)
         return {"ok": True, "at": [x, y], "via": "xtest"}
-    _run(["xdotool", "mousemove", str(x), str(y)])
+    if polite.current() is not None:
+        return {"ok": False, "error": "owned_state_unavailable"}
+    result = _run(["xdotool", "mousemove", str(x), str(y)])
+    if polite.current() is not None and result.returncode:
+        return {"ok": False, "error": "move failed"}
+    _placed(x, y)
     return {"ok": True, "at": [x, y]}
 
 
 def drag(from_x: int, from_y: int, to_x: int, to_y: int) -> dict:
+    if polite.current() is not None:
+        moved = move(from_x, from_y)
+        if not moved.get("ok"):
+            return moved
+        down = mouse_down(1)
+        if not down.get("ok"):
+            return down
+        polite.progress(at=[from_x, from_y], dragged=False, **{"from": [from_x, from_y], "to": [to_x, to_y]})
+        polite.sleep(0.08)
+        moved = move(to_x, to_y)
+        if not moved.get("ok"):
+            return moved
+        polite.progress(at=[to_x, to_y], dragged=True)
+        polite.sleep(0.08)
+        return mouse_up(1) | {"from": [from_x, from_y], "to": [to_x, to_y]}
     emit_cursor("move", from_x, from_y)
     _stamp()
     _placed(to_x, to_y)
@@ -260,6 +314,19 @@ def scroll(direction: str, amount: int = 3) -> dict:
     button = {"up": 4, "down": 5, "left": 6, "right": 7}.get(direction)
     if not button:
         return {"ok": False, "error": "direction must be up|down|left|right"}
+    if polite.current() is not None:
+        completed = 0
+        for _ in range(max(0, int(amount))):
+            polite.guard("scroll")
+            down = mouse_down(button)
+            if not down.get("ok"):
+                return down
+            completed += 1
+            polite.progress(scrolled=direction, amount=completed, remaining=amount-completed)
+            up = mouse_up(button)
+            if not up.get("ok"):
+                return up
+        return {"ok": True, "scrolled": direction, "amount": completed}
     _stamp()
     ch = _xt()
     if ch is not None:
@@ -307,7 +374,7 @@ def _clipboard_snapshot() -> dict | None:
 def _clipboard_restore(snap: dict | None) -> None:
     if not snap or not snap.get("ok"):
         return
-    time.sleep(PASTE_RESTORE_S)
+    polite.sleep(PASTE_RESTORE_S)
     from .platform import linux_x11
     try:
         linux_x11.clipboard_set(text=snap.get("text") or "")
@@ -318,13 +385,75 @@ def _clipboard_restore(snap: dict | None) -> None:
 def _paste(text: str) -> dict:
     """The way a person enters a character that is not on the keyboard."""
     from .platform import linux_x11
+    polite.guard("type_text")
     setres = linux_x11.clipboard_set(text=text)
     if not setres.get("ok"):
         return setres
     return press_key("ctrl+v")
 
 
+def _polite_type(text: str, delay_ms: int, dwell_ms: int) -> dict:
+    ch = _xt()
+    if ch is None:
+        return {"ok": False, "error": "owned_state_unavailable", "typed_len": 0,
+                "total_len": len(text), "remaining": text}
+    typed = 0
+    saved = None
+    browser = ch is not None and active_window_is_browser()
+    pasted = False
+    polite.progress(typed_len=0, total_len=len(text), remaining=text)
+    try:
+        for char in text:
+            polite.guard("type_text")
+            _stamp()
+            via_paste = browser and ch.needs_remap(keysym_for(char))
+            polite.progress(typed_len=0, pressed=False)
+            try:
+                if via_paste:
+                    if not pasted:
+                        saved = _clipboard_snapshot()
+                    pasted = True
+                    r = _paste(char)
+                    if not r.get("ok"):
+                        return dict(r, typed_len=typed, total_len=len(text), remaining=text[typed:])
+                elif ch is not None:
+                    ch.type_text(char, delay_ms=0, dwell_ms=dwell_ms)
+                else:
+                    _require("xdotool")
+                    r = _run(["xdotool", "type", "--delay", "0", "--file", "-"], input_text=char)
+                    if r.returncode:
+                        polite.progress(typed_len=typed, total_len=len(text), remaining=text[typed:])
+                        return {"ok": False, "error": "typing command failed", "typed_len": typed,
+                                "total_len": len(text), "remaining": text[typed:]}
+            except polite.Interrupted as exc:
+                # XTEST key-down already inserts the character, even if dwell is interrupted.
+                sent = bool(exc.result.get("pressed")) if via_paste else bool(exc.result.get("typed_len"))
+                typed += int(sent)
+                polite.progress(typed_len=typed, total_len=len(text), remaining=text[typed:])
+                raise
+            except Exception as exc:
+                # Preserve the acknowledged prefix if a later character/backend fails.
+                sent = bool(polite.current().progress.get("pressed")) if via_paste else bool(
+                    polite.current().progress.get("typed_len"))
+                typed += int(sent)
+                polite.progress(typed_len=typed, total_len=len(text), remaining=text[typed:])
+                return {"ok": False, "error": "backend_error", "detail": f"{type(exc).__name__}: {exc}",
+                        "typed_len": typed, "total_len": len(text), "remaining": text[typed:]}
+            typed += 1
+            polite.progress(typed_len=typed, total_len=len(text), remaining=text[typed:])
+            if delay_ms > 0:
+                polite.sleep(delay_ms / 1000.0)
+        return {"ok": True, "typed_len": typed}
+    finally:
+        # No clipboard mutation follows owner interruption.
+        if saved and polite.current().interrupted is None:
+            polite.guard("type_text")
+            _clipboard_restore(saved)
+
+
 def type_text(text: str, delay_ms: int = 40, dwell_ms: int = 0) -> dict:
+    if polite.current() is not None:
+        return _polite_type(text, delay_ms, dwell_ms)
     _stamp()
     ch = _xt()
     if ch is not None:
@@ -374,14 +503,19 @@ def press_key(key: str, hold_ms: int = 0) -> dict:
     hold_ms is how long the base key stays down on the XTest path (Human
     Mode dwell). The xdotool fallback has no hold and ignores it.
     """
+    polite.progress(pressed=False)
     _stamp(escape=_is_escape(key))
     ch = _xt()
     if ch is not None:
         try:
             ch.press_combo(key, hold_ms=hold_ms)
+        except polite.Interrupted:
+            raise
         except Exception as exc:
             return {"ok": False, "error": f"key failed: {exc}", "key": key, "via": "xtest"}
         return {"ok": True, "key": key, "via": "xtest"}
+    if polite.current() is not None:
+        return {"ok": False, "error": "owned_state_unavailable", "key": key}
     _require("xdotool")
     _run(["xdotool", "key", key])
     return {"ok": True, "key": key}
@@ -403,16 +537,28 @@ def pointer_position() -> dict:
         return {"ok": True, "x": p["x"], "y": p["y"], "screen": "0",
                 "window": str(p["window"] or 0), "buttons": p["buttons"], "via": "xtest"}
     _require("xdotool")
-    out = _run(["xdotool", "getmouselocation", "--shell"]).stdout
-    vals = dict(line.split("=", 1) for line in out.splitlines() if "=" in line)
+    result = _run(["xdotool", "getmouselocation", "--shell"])
+    vals = dict(line.split("=", 1) for line in result.stdout.splitlines() if "=" in line)
+    if result.returncode or "X" not in vals or "Y" not in vals:
+        return {"ok": False, "error": "pointer_unreadable"}
     return {"ok": True, "x": int(vals.get("X", 0)), "y": int(vals.get("Y", 0)),
             "screen": vals.get("SCREEN"), "window": vals.get("WINDOW")}
 
 
 def mouse_down(button: int = 1, x: int | None = None, y: int | None = None) -> dict:
-    """Press and HOLD a mouse button. Pair with mouse_up or the desktop is left
-    with a stuck button."""
     _stamp()
+    if polite.current() is not None:
+        if x is not None and y is not None:
+            result = move(x, y)
+            if not result.get("ok"):
+                return result
+        ch = _xt()
+        if ch is None:
+            return {"ok": False, "error": "owned_state_unavailable",
+                    "detail": "polite button holds need the persistent XTEST channel"}
+        if ch.button(button, True) is False:
+            return {"ok": False, "error": "already_held", "button": button}
+        return {"ok": True, "held": button}
     if x is not None and y is not None:
         _placed(x, y)
     ch = _xt()
@@ -428,42 +574,58 @@ def mouse_down(button: int = 1, x: int | None = None, y: int | None = None) -> d
         cmd += ["mousemove", str(x), str(y)]
         emit_cursor("move", x, y)
     cmd += ["mousedown", str(button)]
-    _run(cmd)
+    r = _run(cmd)
+    if r.returncode == 0:
+        _INPUT_HELD["buttons"].add(button)
     return {"ok": True, "held": button, "at": [x, y] if x is not None else None}
 
 
 def mouse_up(button: int = 1, x: int | None = None, y: int | None = None) -> dict:
+    if polite.current() is not None:
+        # Releasing is allowed during an interruption; coordinate motion is not.
+        x = y = None
     ch = _xt()
     if ch is not None:
         if x is not None and y is not None:
             ch.move(x, y)
-        ch.button(button, False)
-        if x is not None and y is not None:
-            emit_cursor("click", x, y)
-        return {"ok": True, "released": button, "via": "xtest"}
+        changed = ch.button(button, False)
+        return {"ok": True, "released": button if changed is not False else None, "via": "xtest"}
+    if polite.current() is not None and button not in _INPUT_HELD["buttons"]:
+        return {"ok": True, "released": None}
     _require("xdotool")
     cmd = ["xdotool"]
     if x is not None and y is not None:
         cmd += ["mousemove", str(x), str(y)]
     cmd += ["mouseup", str(button)]
-    _run(cmd)
+    result = _run(cmd)
+    if result.returncode:
+        return {"ok": False, "error": "release_failed", "button": button}
+    _INPUT_HELD["buttons"].discard(button)
     if x is not None and y is not None:
         emit_cursor("click", x, y)
     return {"ok": True, "released": button}
 
 
 def key_down(key: str) -> dict:
-    """Hold a key down (modifiers especially). Pair with key_up."""
     _stamp(escape=_is_escape(key))
     ch = _xt()
     if ch is not None:
         try:
-            ch.key(key, True)
+            changed = ch.key(key, True)
+        except polite.Interrupted:
+            raise
         except Exception as exc:
             return {"ok": False, "error": f"key_down failed: {exc}", "key": key, "via": "xtest"}
+        if polite.current() is not None and changed is False:
+            return {"ok": False, "error": "already_held", "key": key}
         return {"ok": True, "held": key, "via": "xtest"}
+    if polite.current() is not None:
+        return {"ok": False, "error": "owned_state_unavailable",
+                "detail": "polite key holds need the persistent XTEST channel"}
     _require("xdotool")
-    _run(["xdotool", "keydown", key])
+    r = _run(["xdotool", "keydown", key])
+    if r.returncode == 0:
+        _INPUT_HELD["keys"].add(key)
     return {"ok": True, "held": key}
 
 
@@ -471,12 +633,17 @@ def key_up(key: str) -> dict:
     ch = _xt()
     if ch is not None:
         try:
-            ch.key(key, False)
+            changed = ch.key(key, False)
         except Exception as exc:
             return {"ok": False, "error": f"key_up failed: {exc}", "key": key, "via": "xtest"}
-        return {"ok": True, "released": key, "via": "xtest"}
+        return {"ok": True, "released": key if changed is not False else None, "via": "xtest"}
+    if polite.current() is not None and key not in _INPUT_HELD["keys"]:
+        return {"ok": True, "released": None}
     _require("xdotool")
-    _run(["xdotool", "keyup", key])
+    r = _run(["xdotool", "keyup", key])
+    if r.returncode:
+        return {"ok": False, "error": "release_failed", "key": key}
+    _INPUT_HELD["keys"].discard(key)
     return {"ok": True, "released": key}
 
 
@@ -492,6 +659,18 @@ def click_with(x: int, y: int, button: int = 1, count: int = 1,
     if unknown:
         return {"ok": False, "error": f"unknown modifier(s) {unknown}",
                 "supported": sorted(_MODIFIERS)}
+    if polite.current() is not None:
+        held = []
+        try:
+            for mod in dict.fromkeys(mods):
+                r = key_down(mod)
+                if not r.get("ok"):
+                    return r
+                held.append(mod)
+            return click(x, y, button=button, count=count)
+        finally:
+            for mod in reversed(held):
+                key_up(mod)
     ch = _xt()
     if ch is not None:
         held = []
@@ -522,6 +701,11 @@ def scroll_at(x: int, y: int, direction: str, amount: int = 3) -> dict:
     button = {"up": 4, "down": 5, "left": 6, "right": 7}.get(direction)
     if not button:
         return {"ok": False, "error": "direction must be up|down|left|right"}
+    if polite.current() is not None:
+        moved = move(x, y)
+        if not moved.get("ok"):
+            return moved
+        return scroll(direction, amount) | {"at": [x, y]}
     emit_cursor("move", x, y)
     _stamp()
     _placed(x, y)
@@ -537,8 +721,10 @@ def scroll_at(x: int, y: int, direction: str, amount: int = 3) -> dict:
 def hover(x: int, y: int, settle_ms: int = 350) -> dict:
     """Move the pointer and wait for hover-triggered UI (tooltips, submenus) to
     appear before the caller screenshots."""
-    move(x, y)
-    time.sleep(max(0, settle_ms) / 1000.0)
+    moved = move(x, y)
+    if not moved.get("ok"):
+        return moved
+    polite.sleep(max(0, settle_ms) / 1000.0)
     return {"ok": True, "at": [x, y], "settled_ms": settle_ms}
 
 
@@ -605,3 +791,22 @@ def kill_window(query: str) -> dict:
         target = matches[0]["id"]
     _run(["xdotool", "windowkill", target])
     return {"ok": True, "killed": target, "warning": "client terminated without saving"}
+
+
+def input_focus() -> dict:
+    ch = _xt()
+    return ch.input_focus() if ch is not None else {"ok": False, "error": "focus_unavailable"}
+
+
+def restore_input_focus(focus: dict) -> dict:
+    ch = _xt()
+    return ch.restore_input_focus(focus) if ch is not None else {"ok": False, "error": "focus_restore_unavailable"}
+
+
+def foreign_holds() -> dict:
+    ch = _xt()
+    return ch.foreign_holds() if ch is not None else {}
+
+
+def polite_input_ready() -> bool:
+    return _xt() is not None

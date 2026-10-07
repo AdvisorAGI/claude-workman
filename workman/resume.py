@@ -91,5 +91,11 @@ def plan(entry: dict | None = None) -> list[dict]:
         step = {"action": tool, **args}
         if target:
             step["x"], step["y"] = int(target[0]), int(target[1])
+        if tool == "click" and res.get("remaining_clicks") is not None:
+            if res["remaining_clicks"] <= 0:
+                return []
+            step["count"] = int(res["remaining_clicks"])
         return [step]
+    if tool == "press_key" and res.get("pressed") is True:
+        return []  # The key reached the app before its dwell was interrupted.
     return [{"action": tool, **args}]

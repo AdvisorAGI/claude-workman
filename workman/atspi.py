@@ -14,6 +14,7 @@ import os
 import subprocess
 import sys
 import time
+from . import polite
 
 DISPLAY = os.environ.get("WORKMAN_DISPLAY") or os.environ.get("DISPLAY") or ":0"
 
@@ -349,10 +350,14 @@ def perform_action(name: str, action: str = "click", role: str | None = None,
         wanted = action.lower()
         for index, candidate in enumerate(available):
             if (candidate or "").lower() == wanted:
+                polite.guard("click")
+                polite.may_change_focus()
                 iface.do_action(index)
                 return {"ok": True, "performed": candidate, "via": "atspi", "element": info}
         return {"ok": False, "error": f"action {action!r} not declared",
                 "available": available, "element": info}
+    except polite.Interrupted:
+        raise
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "element": info}
 
@@ -372,15 +377,22 @@ def set_value(name: str, value: str, role: str | None = None,
     try:
         editable = node.get_editable_text_iface()
         if editable is not None:
+            polite.guard("type_text")
+            polite.may_change_focus()
             editable.set_text_contents(value)
             return {"ok": True, "set": len(value), "via": "editable_text", "element": info}
+    except polite.Interrupted:
+        raise
     except Exception:
         pass
     try:  # sliders/spinners expose a numeric value instead of text
         numeric = node.get_value_iface()
         if numeric is not None:
+            polite.guard("type_text")
             numeric.set_current_value(float(value))
             return {"ok": True, "set": value, "via": "value", "element": info}
+    except polite.Interrupted:
+        raise
     except Exception as exc:
         return {"ok": False, "error": f"{type(exc).__name__}: {exc}", "element": info}
     return {"ok": False, "error": "element is not editable", "element": info}

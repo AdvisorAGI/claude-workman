@@ -17,7 +17,7 @@ import random
 import re
 import time
 
-from . import desktop
+from . import desktop, polite
 
 # ---- typing: log-normal intervals, faster common bigrams, word pauses --------
 #: Clip bands for the per-character flight time (after the key goes up).
@@ -181,7 +181,10 @@ def _wall_ms(ms: float) -> float:
 def _sleep_ms(ms: float) -> None:
     wall = _wall_ms(ms)
     if wall > 0:
-        time.sleep(wall / 1000.0)
+        try:
+            polite.sleep(wall / 1000.0)
+        except polite.Interrupted as exc:
+            raise Interrupted(exc.result) from exc
 
 
 def _ease_in_out(t: float) -> float:
@@ -216,6 +219,7 @@ def jitter_point(x: int, y: int, w: int, h: int,
     return int(round(cx + dx)), int(round(cy + dy))
 
 
+@polite.action("click")
 def human_click_element(el: dict, rng: random.Random | None = None,
                         button: int = 1, count: int = 1) -> dict:
     """Click an element found in an accessibility tree the way a person
@@ -475,6 +479,8 @@ def _act(fn, *args, **kwargs):
     instead of letting the sequence carry on and report work it never did."""
     try:
         result = fn(*args, **kwargs)
+    except polite.Interrupted as exc:
+        raise Interrupted(exc.result) from exc
     except Exception as exc:
         raise Interrupted({"ok": False, "error": "backend_error",
                            "detail": f"{type(exc).__name__}: {exc}"}) from exc
@@ -485,7 +491,8 @@ def _act(fn, *args, **kwargs):
 
 def _stopped(exc: Interrupted, **progress) -> dict:
     """Where a sequence stopped and why, so the caller can resume from there."""
-    out = {"ok": False, "error": "interrupted", "reason": exc.result, "human": True}
+    out = {"ok": False, "error": exc.result.get("error") if exc.result.get("error") == "human_active"
+           else "interrupted", "reason": exc.result, "human": True}
     out.update(progress)
     return out
 
@@ -501,24 +508,30 @@ def _let_go(fn, *args, **kwargs) -> bool:
     return not (isinstance(result, dict) and result.get("ok") is False)
 
 
+@polite.action("move")
 def human_move(x: int, y: int, rng: random.Random | None = None,
                target_px: float | None = None) -> dict:
     rng = resolve_rng(rng)
     x0, y0 = _pointer()
     path = eased_path(x0, y0, x, y, rng, target_px=target_px)
     at = [x0, y0]
+    done = 0
     try:
         for i, (px, py, t_ms) in enumerate(path):
             if i > 0:
                 _sleep_ms(t_ms - path[i - 1][2])
             _act(desktop.move, px, py)
             at = [px, py]
+            done += 1
+            polite.progress(at=at, target=[x, y], points_done=i+1, points_total=len(path))
     except Interrupted as exc:
-        return _stopped(exc, at=at, target=[x, y])
+        return _stopped(exc, at=at, target=[x, y], points_done=done,
+                        points_total=len(path))
     return {"ok": True, "at": at, "target": [x, y], "points": len(path),
             "duration_ms": int(round(_wall_ms(path[-1][2]))), "human": True}
 
 
+@polite.action("click")
 def human_press_click(button: int = 1, count: int = 1,
                       rng: random.Random | None = None, aim: bool = True) -> int:
     """Down/up at the current pointer. Returns the press duration used.
@@ -531,6 +544,7 @@ def human_press_click(button: int = 1, count: int = 1,
     press = click_press_ms(rng)
     for i in range(max(1, int(count))):
         _act(desktop.mouse_down, button)
+        polite.progress(clicks_done=i+1, clicks_total=max(1, int(count)), remaining_clicks=max(0, count-i-1))
         try:
             _sleep_ms(press)
         finally:
@@ -543,6 +557,7 @@ def human_press_click(button: int = 1, count: int = 1,
     return int(round(_wall_ms(press)))
 
 
+@polite.action("click")
 def human_click(x: int, y: int, rng: random.Random | None = None,
                 button: int = 1, count: int = 1,
                 target_px: float | None = None) -> dict:
@@ -553,12 +568,14 @@ def human_click(x: int, y: int, rng: random.Random | None = None,
     try:
         press = human_press_click(button=button, count=count, rng=rng, aim=True)
     except Interrupted as exc:
-        return _stopped(exc, at=moved["at"], target=[x, y], clicked=False)
+        return _stopped(exc, at=moved["at"], target=[x, y],
+                        clicked=bool(polite.current() and polite.current().progress.get("clicks_done")))
     moved.update({"ok": True, "press_ms": press, "button": button, "count": count,
                   "human": True})
     return moved
 
 
+@polite.action("hover")
 def human_hover(x: int, y: int, settle_ms: int = 350,
                 rng: random.Random | None = None) -> dict:
     moved = human_move(x, y, rng)
@@ -570,6 +587,7 @@ def human_hover(x: int, y: int, settle_ms: int = 350,
     return moved
 
 
+@polite.action("drag")
 def human_drag(from_x: int, from_y: int, to_x: int, to_y: int,
                rng: random.Random | None = None) -> dict:
     rng = resolve_rng(rng)
@@ -590,6 +608,7 @@ def human_drag(from_x: int, from_y: int, to_x: int, to_y: int,
             _sleep_ms(t_ms - path[i - 1][2])
             _act(desktop.move, px, py)
             at = [px, py]
+            polite.progress(at=at, points_done=i, points_total=len(path)-1)
     except Interrupted as exc:
         stopped = exc
     finally:
@@ -605,6 +624,7 @@ def human_drag(from_x: int, from_y: int, to_x: int, to_y: int,
             "points": len(path), "released": True, "human": True}
 
 
+@polite.action("scroll")
 def human_scroll(direction: str, amount: int = 3,
                  x: int | None = None, y: int | None = None,
                  rng: random.Random | None = None) -> dict:
@@ -621,12 +641,18 @@ def human_scroll(direction: str, amount: int = 3,
     try:
         for n, pause in plan:
             for i in range(n):
-                _act(desktop.scroll, direction, amount=1)
+                try:
+                    _act(desktop.scroll, direction, amount=1)
+                except Interrupted as exc:
+                    clicks += int(exc.result.get("amount", 0))
+                    raise
                 clicks += 1
+                polite.progress(scrolled=direction, amount=clicks, remaining=sum(n for n, _ in plan)-clicks)
                 if i < n - 1:
                     _sleep_ms(rng.randint(*SCROLL_INTRA_MS))
             _sleep_ms(pause)
     except Interrupted as exc:
+        polite.progress(scrolled=direction, amount=clicks, remaining=sum(n for n, _ in plan)-clicks)
         return _stopped(exc, scrolled=direction, amount=clicks,
                         remaining=sum(n for n, _ in plan) - clicks)
     out: dict = {"ok": True, "scrolled": direction, "amount": clicks,
@@ -639,7 +665,16 @@ def human_scroll(direction: str, amount: int = 3,
 def human_mouse_button(button: int = 1, press: bool = True,
                        x: int | None = None, y: int | None = None,
                        rng: random.Random | None = None) -> dict:
+    return polite.run("mouse_down" if press else "mouse_up",
+                      lambda: _human_mouse_button(button, press, x, y, rng))
+
+
+def _human_mouse_button(button: int = 1, press: bool = True,
+                       x: int | None = None, y: int | None = None,
+                       rng: random.Random | None = None) -> dict:
     rng = resolve_rng(rng)
+    if not press and polite.current() is not None:
+        return desktop.mouse_up(button=button)
     if x is not None and y is not None:
         moved = human_move(int(x), int(y), rng)
         if not moved.get("ok"):
@@ -658,6 +693,7 @@ def human_mouse_button(button: int = 1, press: bool = True,
     return desktop.mouse_up(button=button)
 
 
+@polite.action("type_text")
 def human_type(text: str, rng: random.Random | None = None,
                typos: bool = False, field: str = "") -> dict:
     rng = resolve_rng(rng)
@@ -671,24 +707,46 @@ def human_type(text: str, rng: random.Random | None = None,
             if allow_typos and ch not in " \n\r" and rng.random() < TYPO_CHANCE:
                 wrong = _typo_char(ch, rng)
                 if wrong and wrong != ch:
-                    _act(desktop.type_text, wrong, delay_ms=0, dwell_ms=key_dwell_ms(rng))
+                    try:
+                        _act(desktop.type_text, wrong, delay_ms=0, dwell_ms=key_dwell_ms(rng))
+                    except Interrupted as exc:
+                        stray = bool(exc.result.get("typed_len"))
+                        raise
                     stray = True
                     _sleep_ms(rng.randint(*CHAR_DELAY_MS))
-                    _act(desktop.press_key, "BackSpace")
+                    try:
+                        _act(desktop.press_key, "BackSpace")
+                    except Interrupted as exc:
+                        if exc.result.get("pressed"):
+                            stray = False
+                        raise
                     stray = False
-                    _sleep_ms(rng.randint(50, 150))
                     corrections += 1
+                    _sleep_ms(rng.randint(50, 150))
             if ch in "\n\r":
                 _sleep_ms(max(delay, ENTER_MIN_MS))
-                _act(desktop.press_key, "Return")
+                try:
+                    _act(desktop.press_key, "Return")
+                except Interrupted as exc:
+                    typed += int(bool(exc.result.get("pressed")))
+                    raise
             else:
                 # The key is held for `dwell`; the rest of the cadence gap is
                 # flight time to the next key.
                 dwell = key_dwell_ms(rng)
-                _act(desktop.type_text, ch, delay_ms=0, dwell_ms=dwell)
+                try:
+                    _act(desktop.type_text, ch, delay_ms=0, dwell_ms=dwell)
+                except Interrupted as exc:
+                    typed += int(exc.result.get("typed_len", 0))
+                    raise
+                typed += 1
+                polite.progress(typed_len=typed, total_len=len(text), remaining=text[typed:])
                 _sleep_ms(max(20, delay - dwell))
+                continue
             typed += 1
+            polite.progress(typed_len=typed, total_len=len(text), remaining=text[typed:])
     except Interrupted as exc:
+        polite.progress(typed_len=typed, total_len=len(text), remaining=text[typed:])
         # `remaining` is exactly what to type to finish; `uncorrected_typo`
         # means one wrong character is still in the field before it.
         return _stopped(exc, typed_len=typed, remaining=text[typed:],

@@ -83,6 +83,14 @@ class TestBatch:
         assert ran == [1]
         assert result["completed"] == 1
 
+    def test_owner_interrupt_stops_even_continue_on_error(self, monkeypatch):
+        ran = []
+        monkeypatch.setitem(server._BATCH_OPS, "paused",
+                            lambda: {"ok": False, "error": "human_active"})
+        monkeypatch.setitem(server._BATCH_OPS, "after", lambda: ran.append(1) or {"ok": True})
+        result = server.batch([{"action": "paused"}, {"action": "after"}], stop_on_error=False)
+        assert not ran and not result["ok"]
+
     def test_unknown_action_lists_what_is_available(self):
         result = server.batch([{"action": "teleport"}])
         assert result["ok"] is False

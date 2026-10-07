@@ -41,6 +41,10 @@ key_down = x11.key_down
 key_up = x11.key_up
 emit_cursor = x11.emit_cursor
 foreign_pointer_motion = x11.foreign_pointer_motion
+foreign_holds = x11.foreign_holds
+polite_input_ready = x11.polite_input_ready
+input_focus = x11.input_focus
+restore_input_focus = x11.restore_input_focus
 
 
 def display_name() -> str:

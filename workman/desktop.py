@@ -16,7 +16,7 @@ from __future__ import annotations
 import shutil
 import time
 
-from . import owner_pause, shell_guard
+from . import owner_pause, shell_guard, polite
 from .platform import active, backend_name, load
 from .platform import base
 
@@ -108,6 +108,9 @@ def _focused_window():
         from . import x11
         ch = x11._xt()
         if ch is not None:
+            if polite.current() is not None:
+                identity = ch.focused_window_identity()
+                return identity if identity.get("ok") else FOCUS_UNREADABLE
             return ch.active_window_info()
         return _xdotool_focused()
     except Exception:
@@ -220,6 +223,12 @@ def _viewer_refusal(name: str, *args, **kwargs) -> dict | None:
 
 
 def _safe(name: str, *args, **kwargs) -> dict:
+    if name in owner_pause.INPUT_ACTIONS or name in ("mouse_up", "key_up"):
+        return polite.run(name, lambda: _safe_inner(name, *args, **kwargs))
+    return _safe_inner(name, *args, **kwargs)
+
+
+def _safe_inner(name: str, *args, **kwargs) -> dict:
     """Call a backend action, converting an unsupported capability into a
     result the model can read instead of an exception it cannot.
 
@@ -231,20 +240,33 @@ def _safe(name: str, *args, **kwargs) -> dict:
     viewer would forward it to another machine.
     """
     if name in owner_pause.INPUT_ACTIONS:
-        if owner_pause.blocked(name):
-            return owner_pause.refusal(name)
-        if name in owner_pause.MOUSE_ACTIONS:
-            # A backend that can tell the pointer was moved by someone else
-            # (X11: it is not where the agent last put it) reports the owner.
-            moved = getattr(active(), "foreign_pointer_motion", None)
-            if moved is not None and moved():
-                owner_pause.mark_human_input()
-        if owner_pause.human_active():
-            still_busy = owner_pause.wait_for_human_quiet()
+        if polite.current() is not None:
+            try:
+                polite.guard(name)
+            except polite.Interrupted as exc:
+                # Progress on a refused sub-call is zero, even in an outer typing sequence.
+                if name == "type_text":
+                    exc.result = dict(exc.result, typed_len=0)
+                elif name == "press_key":
+                    exc.result = dict(exc.result, pressed=False)
+                elif name == "scroll":
+                    exc.result = dict(exc.result, amount=0)
+                raise
+        elif polite.gate_enabled(active()):
             if owner_pause.blocked(name):
                 return owner_pause.refusal(name)
-            if still_busy:
-                return owner_pause.refusal(name, error="human_active")
+            if name in owner_pause.MOUSE_ACTIONS:
+                # A backend that can tell the pointer was moved by someone else
+                # (X11: it is not where the agent last put it) reports the owner.
+                moved = getattr(active(), "foreign_pointer_motion", None)
+                if moved is not None and moved():
+                    owner_pause.mark_human_input()
+            if owner_pause.human_active():
+                still_busy = owner_pause.wait_for_human_quiet()
+                if owner_pause.blocked(name):
+                    return owner_pause.refusal(name)
+                if still_busy:
+                    return owner_pause.refusal(name, error="human_active")
         if name in _VIEWER_GUARDED:
             if (refused := _viewer_refusal(name, *args, **kwargs)) is not None:
                 return refused
@@ -262,7 +284,10 @@ def _safe(name: str, *args, **kwargs) -> dict:
         return base.unsupported(name, where,
                                 "this backend does not implement it yet")
     try:
-        return fn(*args, **kwargs)
+        result = fn(*args, **kwargs)
+        if name in owner_pause.INPUT_ACTIONS:
+            polite.observe_focus()
+        return result
     except base.Unsupported as exc:
         return base.unsupported(name, where, str(exc))
 

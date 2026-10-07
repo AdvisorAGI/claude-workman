@@ -287,6 +287,10 @@ def reset() -> None:
     _HELD["buttons"].clear()
     _POINTER_BEFORE["at"] = None
     _STATE["unknown"] = False
+    from . import x11, polite
+    x11._INPUT_HELD["keys"].clear()
+    x11._INPUT_HELD["buttons"].clear()
+    polite._PENDING.clear()
     try:
         _persist_entries([])
     except OSError:
@@ -311,9 +315,54 @@ def _backend_attr(name: str):
 
 
 # ---- 1. release --------------------------------------------------------------------
+def owned_holds() -> bool:
+    """Only holds recorded by this input process, never shared device state."""
+    from . import x11
+    ch = x11._xt()
+    if ch is not None:
+        fn = getattr(ch, "owned_holds", None)
+        return bool(fn()) if fn is not None else False
+    return bool(x11._INPUT_HELD["keys"] or x11._INPUT_HELD["buttons"])
+
+
+def release_owned() -> dict:
+    """Interruption cleanup: no broad XTEST or blind modifier/button releases."""
+    from . import x11
+    ch = x11._xt()
+    if ch is not None:
+        fn = getattr(ch, "release_owned", None)
+        if fn is not None:
+            return fn()
+        return {"ok": False, "error": "owned_release_unavailable"}
+    errors = []
+    released = {"keys": [], "buttons": []}
+    for key in list(x11._INPUT_HELD["keys"]):
+        try:
+            r = x11.key_up(key)
+            if r.get("ok"):
+                released["keys"].append(key)
+            else:
+                errors.append(r)
+        except Exception as exc:
+            errors.append({"key": key, "error": str(exc)})
+    for button in list(x11._INPUT_HELD["buttons"]):
+        try:
+            r = x11.mouse_up(button)
+            if r.get("ok"):
+                released["buttons"].append(button)
+            else:
+                errors.append(r)
+        except Exception as exc:
+            errors.append({"button": button, "error": str(exc)})
+    return {"ok": not errors, "released": released, "errors": errors}
+
+
 def release_all() -> dict:
     """Let go of everything the agent holds, then ask the X server what the
     XTEST devices still hold. `verified` is that answer, not a guess."""
+    from . import polite
+    if polite.enabled():
+        return polite.run("key_up", release_owned)
     out: dict = {"tracked": held(), "released": {"keys": [], "buttons": []}, "errors": []}
     for key in list(_HELD["keys"]):
         r = desktop.key_up(key)

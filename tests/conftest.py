@@ -32,6 +32,9 @@ def _blocked_run(cmd, timeout=20, input_text=None, **_kw):
 @pytest.fixture(autouse=True)
 def _no_live_desktop(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKMAN_XTEST", "0")
+    # Polite-specific tests explicitly enable it with a mocked backend. Never
+    # start a real overlay or restore focus from a generic unit test.
+    monkeypatch.setenv("WORKMAN_POLITE", "0")
     monkeypatch.setenv("WORKMAN_STATE_DIR", str(tmp_path / "wm-state"))
     monkeypatch.setattr(x11, "_xt", lambda: None)
     monkeypatch.setattr(x11, "_run", _blocked_run)

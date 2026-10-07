@@ -39,7 +39,7 @@ INSTRUCTION = (
 )
 HUMAN_ACTIVE_INSTRUCTION = (
     "The owner is using the mouse or keyboard right now. Agent input yielded "
-    "and was not sent. Wait a few seconds, screenshot to see what changed, "
+    "and stopped. Check the completed and remaining progress. Wait a few seconds, screenshot to see what changed, "
     "then retry from the partial progress in this result."
 )
 
@@ -220,6 +220,14 @@ def agent_escape_age() -> float | None:
     return _age(AGENT_ESCAPE_STAMP)
 
 
+def human_input_stamp() -> int | None:
+    """Exact stamp identity for detecting even recently aged mid-action input."""
+    try:
+        return os.stat(_stamp_path(HUMAN_STAMP)).st_mtime_ns
+    except FileNotFoundError:
+        return None
+
+
 def human_input_age() -> float | None:
     return _age(HUMAN_STAMP)
 
@@ -257,14 +265,20 @@ def wait_for_human_quiet(max_wait: float | None = None,
 def status() -> dict:
     """Everything a person or a tool wants to know about the pause state."""
     s = state()
+    from . import polite, desktop
+    on = polite.enabled()
+    quiet = polite._seconds("WORKMAN_POLITE_QUIET_S", 2.0) if on else HUMAN_QUIET_S
+    limit = polite._seconds("WORKMAN_POLITE_MAX_WAIT_S", 20.0) if on else HUMAN_YIELD_S
     return {
         "input_switches": {"mouse": s["mouse"], "keyboard": s["keyboard"]},
         "paused_by": s.get("paused_by"),
         "paused_at": s.get("paused_at"),
         "human_input_age_s": human_input_age(),
-        "human_active": human_active(),
+        "human_active": human_active(quiet),
         "agent_input_age_s": agent_input_age(),
-        "quiet_s": HUMAN_QUIET_S,
-        "yield_s": HUMAN_YIELD_S,
+        "quiet_s": quiet,
+        "yield_s": limit,
+        "polite": on,
+        "gate_enabled": polite.gate_enabled(desktop.active()),
         "root": str(_root()),
     }
