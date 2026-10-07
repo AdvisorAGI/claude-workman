@@ -43,6 +43,14 @@ Park **this session's app** (the terminal or chat running the agent) in a **full
 - Full runbook with every live-verified fact, the hardware fault history, the headless-Air rules and the mistakes made while building this: `TV-REMOTE.md` beside this file.
 - Learned live 2026-10-02: space keys >= 0.3 s or the set drops them; `uiautomator` is the only way to read menus (screencap is empty on HDMI); `power_picture_off` is 1 = ON, 0 = OFF; Wake-on-LAN never wakes this set; blind D-pad once reached the account picker beside "Remove account", so read focus before every select.
 
+## Office AC (Gree, LAN)
+
+`ac(cmd)` runs the DGX driver `~/bin/ac`: `status | on | off | temp N | mode cool|heat|dry|fan|auto | fan auto|low|mid|high | quiet on|off | cool-quiet [N] | lock N | lock off | lock status | log` (N = 16-30 C). Off the DGX: `remote(host='dgx', verb='ac', args=[...])`; shell: `wm.py ac <cmd>`.
+
+- Read `status` first: people in the office also use the remote.
+- A lock (`lock N`) resets the setpoint every 60 s while the AC is on and never powers it on; while it is on, `temp N` retargets it.
+- Full facts, lock behavior and mistakes: `knowledge/OFFICE-AC.md` in the installed skill.
+
 ## Install (CLI)
 
 From a clone of this repo:

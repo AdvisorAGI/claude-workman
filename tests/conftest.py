@@ -12,7 +12,8 @@ are unreachable from the suite: Quartz/AX loaders are short-circuited, helper
 subprocesses (`x11._run`, `darwin._run`) return a blocked result, and
 desktop-entry directories are empty. A test that needs a backend patches it
 in. The LAN TV (workman.tv) is unreachable the same way: connecting raises, the
-port probes say closed, and the remote-protocol fallback refuses. Do not stub
+port probes say closed, and the remote-protocol fallback refuses. The office AC
+driver (workman.ac) points at a path that does not exist. Do not stub
 `desktop._focused_window` here — the Linux viewer-guard tests drive that hook
 through a fake XTest channel.
 """
@@ -73,6 +74,7 @@ def _no_live_desktop(monkeypatch, tmp_path):
     monkeypatch.setattr(tv, "_send_keys_remote", _no_tv)
     monkeypatch.setattr(tv, "_port_open", lambda *_a, **_k: False)
     monkeypatch.setattr(tv, "_link", None)
+    monkeypatch.setenv("WORKMAN_AC_DRIVER", str(tmp_path / "no-ac-driver"))
 
     handback.reset()
     resume.clear()

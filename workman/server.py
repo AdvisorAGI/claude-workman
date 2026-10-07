@@ -62,11 +62,12 @@ def _optional(name: str):
         return _Unavailable(name, exc)
 
 
-# `_remote` because the `remote` tool below would otherwise shadow the module.
-(a11y, account, apps, bridge, chrome, esc_pause, handback, owner_pause, _remote,
+# `_ac` and `_remote` because the `ac` and `remote` tools below would otherwise
+# shadow the modules.
+(_ac, a11y, account, apps, bridge, chrome, esc_pause, handback, owner_pause, _remote,
  resume, session, shortcuts, shotlog, skills_index, tv, vision, workspace_layout) = (
     _optional(n) for n in (
-        "a11y", "account", "apps", "bridge", "chrome", "esc_pause", "handback",
+        "ac", "a11y", "account", "apps", "bridge", "chrome", "esc_pause", "handback",
         "owner_pause", "remote", "resume", "session", "shortcuts", "shotlog",
         "skills_index", "tv", "vision", "workspace_layout"))
 
@@ -1544,6 +1545,28 @@ def tv_power_off(confirm: bool = False) -> dict:
     no tool can. For a dark screen that stays controllable use tv_screen('off').
     Without confirm=True nothing is sent and the warning comes back."""
     return _tv(lambda: tv.power_off(confirm=confirm))
+
+
+# ---- OFFICE AC ---------------------------------------------------------------
+# The office Gree AC (workman.ac): a thin shell over the DGX driver ~/bin/ac,
+# which owns the LAN protocol, the bounds and the temperature lock.
+
+@mcp.tool()
+def ac(cmd: str = "status") -> dict:
+    """The office Gree AC over the LAN, through the DGX driver ~/bin/ac.
+
+    cmd: status | on | off | temp N | mode cool|heat|dry|fan|auto |
+    fan auto|low|mid|high | quiet on|off | cool-quiet [N] | lock N | lock off |
+    lock status | log | help, with N = 16-30 C. `status` is one JSON line
+    (power, mode, set_c, room_c, fan, quiet, lock). A lock resets the setpoint
+    every 60 s while the AC is on and never powers it on; while it is on,
+    temp N retargets it. Read status before changing anything: people also use
+    the remote. Off the DGX: remote(host='dgx', verb='ac', args=[...]).
+    """
+    try:
+        return _ac.run(cmd)
+    except Exception as exc:  # a tool answers with the error, never raises
+        return {"ok": False, "error": "ac_failed", "detail": f"{type(exc).__name__}: {exc}"}
 
 
 # ---- BATCH -----------------------------------------------------------------
