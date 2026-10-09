@@ -55,7 +55,7 @@ build-backend = "setuptools.build_meta"
 # Subpackages must be listed explicitly: setuptools does not recurse into
 # subpackages here, and omitting it ships a wheel that imports on the developer's
 # machine and fails on every user's.
-packages = ["workman", "workman.platform", "workman.desk", "workman.studio"]
+packages = ["workman", "workman.platform", "workman.desk", "workman.studio", "workman.orchestra"]
 
 [tool.setuptools.package-data]
 # Non-Python files the code opens next to itself: the Desk page and the Studio's

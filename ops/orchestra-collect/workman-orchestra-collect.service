@@ -1,0 +1,10 @@
+# Example only; nothing installs this. Copy to ~/.config/systemd/user/ and
+# point ExecStart at your checkout, then enable the .timer.
+[Unit]
+Description=Workman orchestra collector (zero-model session events)
+
+[Service]
+Type=oneshot
+Nice=10
+IOSchedulingClass=idle
+ExecStart=%h/workman/bin/workman orchestra-collect

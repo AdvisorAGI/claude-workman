@@ -1,0 +1,12 @@
+# Example only. One pass every 45 s; a pass that finds another collector
+# running returns busy and exits, so overlap is harmless.
+[Unit]
+Description=Run the Workman orchestra collector every 45 s
+
+[Timer]
+OnBootSec=2min
+OnUnitActiveSec=45s
+AccuracySec=5s
+
+[Install]
+WantedBy=timers.target

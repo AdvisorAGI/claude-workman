@@ -132,6 +132,17 @@ macOS AXUIElement-based computer use, ported to Linux via AT-SPI2 (`gi.repositor
 | `skill_add` | Copy a skill directory (frontmatter validated) into the first `$WORKMAN_SKILL_ROOTS` entry or a given root. Never overwrites |
 | `skill_reindex` | Rebuild the cached index now; normally automatic when a SKILL.md changes |
 
+**Orchestra (the lead's view of every Claude session)** — zero model calls; see [docs/ORCHESTRA-TOOLS.md](docs/ORCHESTRA-TOOLS.md)
+
+| Tool | What it does |
+|------|--------------|
+| `sessions_list` | Every session on this machine: account, model/effort, context % of 1M, state, front end, pid |
+| `session_needs` | Only the sessions waiting on someone: question, permission prompt, denial, usage limit, silence |
+| `session_usage` | Tokens, images, turns per session or account, plus first prompts repeated across sessions |
+| `session_events` | Cursor feed of new events; `workman orchestra-collect` fills it from a timer |
+| `session_compact` | Compact ANOTHER session from its front end at a clean turn, in a token band. Dry run by default |
+| `session_set_model_effort` | Change ANOTHER session's model/effort through its picker. Fable only with `allow_fable=True`. Dry run by default |
+
 **Memory (token-light)**
 
 | Tool | What it does |

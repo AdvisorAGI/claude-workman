@@ -63,12 +63,14 @@ def _optional(name: str):
 
 
 # `_remote` because the `remote` tool below would otherwise shadow the module.
-(a11y, account, apps, bridge, chrome, esc_pause, handback, owner_pause, _remote,
- resume, session, shortcuts, shotlog, skills_index, vision, workspace_layout) = (
+(a11y, account, apps, bridge, chrome, esc_pause, front_compact, handback,
+ orchestra_control, orchestra_tools, owner_pause, _remote, resume, session, shortcuts,
+ shotlog, skills_index, vision, workspace_layout) = (
     _optional(n) for n in (
-        "a11y", "account", "apps", "bridge", "chrome", "esc_pause", "handback",
-        "owner_pause", "remote", "resume", "session", "shortcuts", "shotlog",
-        "skills_index", "vision", "workspace_layout"))
+        "a11y", "account", "apps", "bridge", "chrome", "esc_pause", "front_compact",
+        "handback", "orchestra_control", "orchestra_tools", "owner_pause", "remote",
+        "resume", "session", "shortcuts", "shotlog", "skills_index", "vision",
+        "workspace_layout"))
 
 mcp = FastMCP("claude-workman")
 
@@ -1201,6 +1203,121 @@ def session_handoff(cwd: str, content: str = "") -> dict:
     from when the context it was holding is gone.
     """
     return session.handoff(cwd, content=content)
+
+
+@mcp.tool()
+def session_front_compact(local_id: str, transcript: str, resume: str = "",
+                          expect: str = "", self_id: str = "") -> dict:
+    """Compact ANOTHER Claude desktop session from its front end, in the background.
+
+    Goes through session_compact's guards (caller known and not the target,
+    end_turn on the main chain, quiet >= 60 s, no open question, registry
+    neither busy nor waiting, the 300k-400k band, frontend lock), then starts
+    the detached runner and returns at once with its pid and the log path
+    (~/orchestra/compact-log.jsonl). The runner rechecks the same turn guards
+    before the first click, fronts the session by its deep link, refuses unless
+    the header hash on screen equals `expect` (or the hash stored by
+    `python -m workman.front_compact <local_id> --learn`), types /compact,
+    confirms a new compact_boundary, then sends `resume` as one line.
+    `local_id` is local_<uuid>; `transcript` is that session's .jsonl.
+    """
+    return orchestra_control.session_front_compact(local_id, transcript, resume, expect,
+                                                   self_id=_caller(self_id))
+
+
+# ---- ORCHESTRA (the lead's view of every session; read-only unless mode="run") ----
+# Zero model calls: transcripts, the CLI's live registry, the desktop app's
+# session store and /proc. Compaction and model/effort changes only ever touch
+# ANOTHER session, at a clean turn, and default to a dry run.
+
+def _caller(self_id: str = "") -> str:
+    """The calling session's id(s) as this server knows them: the explicit
+    one, the env, and the Claude process this server runs under. Empty when
+    none is known, and the control tools then refuse."""
+    try:
+        return ",".join(orchestra_tools.caller_ids(self_id))
+    except Exception:
+        return self_id or ""
+
+@mcp.tool()
+def sessions_list(machine: str = "local", active_within_min: float = 180,
+                  include_subagents: bool = False) -> dict:
+    """Every Claude Code session on this machine active within the window: short
+    id, account (email from that config dir's .claude.json, never a token),
+    model and effort (what last ran, plus the front end's setting), context
+    tokens and % of 1M, state (working / idle / needs_input / blocked / silent /
+    limit_hit) and why, age, title or first prompt, cwd, front end (desktop
+    local_id, Remote Control `claude rc` name, headless unit, tmux, terminal)
+    and the owning pid. machine="mac-one" etc. runs the same read over ssh."""
+    return orchestra_tools.sessions_list(machine, active_within_min, include_subagents)
+
+
+@mcp.tool()
+def session_needs(machine: str = "local", silent_min: float = 25) -> dict:
+    """Only the sessions waiting on someone: an open AskUserQuestion (question
+    text and option labels), a permission prompt, a classifier/permission
+    denial that ended the turn, a usage limit, or silence inside a turn for
+    more than silent_min minutes."""
+    return orchestra_tools.session_needs(machine, silent_min)
+
+
+@mcp.tool()
+def session_usage(window_h: float = 24, by: str = "session", top: int = 25,
+                  include_subagents: bool = False) -> dict:
+    """Input / cache-read / cache-creation / output tokens, images, turns and API
+    calls per session (by="session") or per account (by="account") over the
+    last window_h hours, ranked by total tokens, plus `repeats`: first prompts
+    that more than one session started from (work being redone). Pure
+    transcript parsing, zero model calls."""
+    return orchestra_tools.session_usage(window_h, by, top, include_subagents)
+
+
+@mcp.tool()
+def session_events(since_cursor: str = "", kinds: str = "", limit: int = 50) -> dict:
+    """New session events after since_cursor (question, permission, blocked,
+    limit_hit, silent, compact_ready, finished), from
+    ~/orchestra/session-events.jsonl. Runs one zero-model collector pass first,
+    so it works with or without the `workman orchestra-collect` timer. Pass the
+    returned `cursor` next time; `kinds` filters, comma separated."""
+    return orchestra_tools.session_events(since_cursor, kinds, limit)
+
+
+@mcp.tool()
+def session_compact(session: str, mode: str = "dry_run", min_tokens: int = 300000,
+                    max_tokens: int = 400000, force: bool = False, resume: str = "",
+                    self_id: str = "") -> dict:
+    """Compact ANOTHER session from its front end, only at a clean turn (last
+    main-chain assistant stop_reason end_turn, quiet >= 60 s, no open question,
+    registry neither busy nor waiting) and inside the policy band 300k-400k
+    (min/max may narrow it, only force skips it). Refuses this session, and
+    refuses everything when the calling session cannot be identified.
+    Desktop: the front_compact runner (deep link, header-hash guard, /compact,
+    new compact_boundary). Remote Control: claude.ai/code in Chrome, page title
+    guard. Headless -p: refused with the reason. mode="dry_run" (default)
+    returns every guard and the exact steps and touches nothing. `session` is
+    an id or prefix, a local_<uuid>, or an exact title."""
+    return orchestra_control.session_compact(session, mode, min_tokens, max_tokens, force,
+                                             resume, self_id=_caller(self_id))
+
+
+@mcp.tool()
+def session_set_model_effort(session: str, model: str = "", effort: str = "",
+                             mode: str = "dry_run", allow_fable: bool = False,
+                             max_tokens: int = 400000, force: bool = False,
+                             self_id: str = "") -> dict:
+    """Change ANOTHER session's model and/or effort from its front end: the
+    composer-footer picker in the desktop app, the same picker on
+    claude.ai/code for a Remote Control session. Effort is low|medium|high|
+    xhigh|max; model is opus|sonnet|haiku|fable or a claude-<family>-<ver> id.
+    Fable only when allow_fable=True (the owner's explicit choice). A model
+    switch re-reads the whole context uncached, so it is refused above 400k
+    (max_tokens may lower that, force skips it). Same turn guards as
+    session_compact, and the new value is verified after the change. Headless
+    -p: refused, the change applies at the next resume (run-claude-seat
+    --model/--effort --resume). Dry run by default."""
+    return orchestra_control.session_set_model_effort(
+        session, model, effort, mode, self_id=_caller(self_id), allow_fable=allow_fable,
+        max_tokens=max_tokens, force=force)
 
 
 # ---- SKILLS (load on demand) ----------------------------------------------

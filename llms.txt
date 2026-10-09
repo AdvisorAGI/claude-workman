@@ -40,6 +40,8 @@ remain available as a fallback.
 - `type_text`, `press_key` — keyboard input, xdotool key syntax
 - `show_cursor` — visual click-cursor overlay (ring + ripple) for human oversight
 - `skill_search`, `skill_show`, `skill_add`, `skill_reindex` — find a skill by query and load only that one (or one section of it)
+- `sessions_list`, `session_needs`, `session_usage`, `session_events` — read-only view of every Claude Code session on the machine (state, context, account, front end, usage, event feed)
+- `session_compact`, `session_set_model_effort` — compact or re-model ANOTHER session from its front end at a clean turn; dry run by default
 
 ## Requirements
 

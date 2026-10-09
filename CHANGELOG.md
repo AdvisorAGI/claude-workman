@@ -4,6 +4,51 @@ All notable changes to claude-workman.
 
 ## [Unreleased]
 
+### Added — orchestra tools (one place to see and steer every session)
+
+- **`sessions_list`**, **`session_needs`**, **`session_usage`**, **`session_events`**
+  (`workman/orchestra_tools.py` over the `workman/orchestra/` package,
+  `workman orchestra-list|needs|usage|events`) —
+  every Claude Code session on the machine from its transcript, the CLI's live
+  registry (`<config>/sessions/<pid>.json`), the desktop app's session store and
+  /proc: account (email only), model and effort, context % of 1M, state
+  (working / idle / needs_input / blocked / silent / limit_hit), front end
+  (desktop, Remote Control, headless, tmux) and pid. Usage is deduped per
+  message id and exposes repeated first prompts. Zero model calls.
+- **`workman orchestra-collect`** — a zero-model collector for a 30-60 s timer:
+  appends question, permission, blocked, limit_hit, silent, compact_ready and
+  finished events to `~/orchestra/session-events.jsonl`, deduped by key, with a
+  monotonic cursor. Consolidates the orchestra watchers and the hook feed.
+- **`session_compact`** (`workman orchestra-compact`) — compacts ANOTHER session
+  from its front end only at a clean turn and inside a token band: desktop via
+  the `front_compact` runner, Remote Control via claude.ai/code in Chrome,
+  headless refused. Dry run by default; refuses the caller's own session.
+- **`session_set_model_effort`** (`workman orchestra-set-model`) — the same
+  guards, through the composer-footer picker; Fable only with `allow_fable=True`;
+  a model switch is refused above 400k context; headless seats are told the
+  `run-claude-seat --resume` line instead.
+- Every control action refuses when the calling session cannot be identified
+  (env, Claude ancestor in the live registry, or `self_id`), blocks on a
+  registry `waiting` as well as `busy`, clamps the caller's band into the
+  300k-400k policy, and rechecks the full turn guards (main chain only) right
+  before the first click.
+- `session_front_compact` now runs through `session_compact`'s guards, and so
+  do the runner CLIs (`python -m workman.front_compact`, `rc-compact`):
+  band included, `--force` only with a logged `--reason`. The resume line
+  after a compaction is typed only after the same turn check passes again.
+  An explicit self id must be a session id (>= 8 hex chars).
+
+### Added — front-end compaction (`session_front_compact`)
+
+- **`session_front_compact`** / `python -m workman.front_compact` — compacts a
+  Claude desktop session from its front end on :0: waits until the transcript
+  shows the turn ended, defers while vlc or mpv runs, fronts the session by its
+  deep link, refuses unless the header hash on screen matches, types /compact,
+  confirms a new compact_boundary, then sends a one-line resume. The tool starts
+  a detached runner and returns at once (the caller may be the target). Header
+  hashes are learned with `--learn` into `~/.workman/front-compact/headers.json`;
+  every outcome is one JSON line in `~/orchestra/compact-log.jsonl`.
+
 ### Added — skill finder (load skills on demand)
 
 - **`skill_search`**, **`skill_show`**, **`skill_add`**, **`skill_reindex`** — a

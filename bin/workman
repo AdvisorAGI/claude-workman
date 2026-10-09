@@ -1,12 +1,25 @@
 #!/bin/sh
 # Stdio entry for the Workman connector (python -m workman.server).
 # Used by the Claude/Grok plugin (.mcp.json) and as a CLI launcher.
+#
+#   workman                         the MCP server (no arguments)
+#   workman orchestra-collect       one zero-model collector pass (timer-safe)
+#   workman orchestra-list|needs|usage|events [flags]   the read-only session views
+#   workman orchestra-compact|set-model <session> [--run]   front-end control (dry run by default)
 set -u
 ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+PY=python3
 if [ -x "$ROOT/.venv/bin/python" ]; then
-  exec "$ROOT/.venv/bin/python" -m workman.server
+  PY="$ROOT/.venv/bin/python"
+elif [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
+  PY="$ROOT/.venv/Scripts/python.exe"
 fi
-if [ -x "$ROOT/.venv/Scripts/python.exe" ]; then
-  exec "$ROOT/.venv/Scripts/python.exe" -m workman.server
-fi
-exec python3 -m workman.server
+case "${1:-}" in
+  orchestra-compact|orchestra-set-model)
+    sub=${1#orchestra-}; shift
+    cd "$ROOT" && exec "$PY" -m workman.orchestra_control "$sub" "$@" ;;
+  orchestra-*)
+    sub=${1#orchestra-}; shift
+    cd "$ROOT" && exec "$PY" -m workman.orchestra_tools "$sub" "$@" ;;
+esac
+exec "$PY" -m workman.server
