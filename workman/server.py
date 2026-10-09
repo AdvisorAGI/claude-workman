@@ -1789,6 +1789,100 @@ def layout_arrange(spec: dict) -> dict:
     return workspace_layout.arrange(spec)
 
 
+# ---- NON-CLAUDE MODEL TOOLS --------------------------------------------------
+# workman.model_tools (docs/MODEL-TOOLS.md): Codex, Grok and Cursor CLI agents and
+# image/video generation, each launched through ~/bin/run-model (or the grok-web
+# MCP functions) as its own detached process, so the work costs no Claude usage.
+# Every tool returns at once or after a bounded wait, with a job id, state, file
+# paths or a capped text tail; model output never streams into the caller.
+_model_tools = _optional("model_tools")
+
+
+def _mt(fn, *args, **kwargs) -> dict:
+    try:
+        return fn(*args, **kwargs)
+    except Exception as exc:
+        return {"ok": False, "error": f"{type(exc).__name__}: {exc}"}
+
+
+@mcp.tool()
+def agent_run(cli: str, prompt: str, effort: str = "high", cwd: str = "",
+              machine: str = "mac-one", role: str = "", out: str = "",
+              timeout_s: int = 2700) -> dict:
+    """Launch a non-Claude CLI agent via ~/bin/run-model, detached; returns a job id at once.
+    cli: codex|grok|cursor|astra|luna|terra (direct mode, with effort max|xhigh|high|medium|low),
+    or role: a run-model router role (cheap, mid, review, review-deep, build-sol, review-grok,
+    quick, build, ...) whose lane the router picks. machine: mac-one (default, keeps builds off
+    the DGX) | mac-air | dgx | local. cwd defaults to the job's scratch dir on that machine.
+    Subscription CLIs only; no API key reaches the worker. Poll agent_status, read agent_result."""
+    return _mt(_model_tools.agent_run, cli, prompt, effort=effort, cwd=cwd, machine=machine,
+               role=role or None, out=out or None, timeout_s=timeout_s)
+
+
+@mcp.tool()
+def agent_status(job: str = "", limit: int = 20, reconcile: bool = False) -> dict:
+    """State of one job, or of the last `limit` jobs started from here: running | finished |
+    failed | timed_out | cancelled | lost | launch_failed, with model, effort, machine, age and
+    exit code. reconcile=True also lists run-model-* units with no job record and launches
+    whose outcome was never confirmed."""
+    return _mt(_model_tools.agent_status, job or None, limit=limit, reconcile=reconcile)
+
+
+@mcp.tool()
+def agent_result(job: str, max_lines: int = 40) -> dict:
+    """Bounded result of a job: its report file, else the CLI's final message, else the log
+    tail (at most max_lines lines and 4000 characters), plus the full log path and any files."""
+    return _mt(_model_tools.agent_result, job, max_lines=max_lines)
+
+
+@mcp.tool()
+def agent_cancel(job: str) -> dict:
+    """Stop a job cleanly: only its own unit (run-model-<job>.service) and processes proven
+    to be the job's are signalled; a lost job is never signalled. run-comeback will not
+    relaunch it."""
+    return _mt(_model_tools.agent_cancel, job)
+
+
+@mcp.tool()
+def image_generate(prompt: str, provider: str = "codex", out_dir: str = "", n: int = 1,
+                   size: str = "", machine: str = "", wait_s: float = 0) -> dict:
+    """Generate images; returns a job id at once (poll agent_status, then agent_result for the
+    file paths, never bytes). provider=codex: Codex CLI's built-in image_gen on the ChatGPT plan
+    login (no API key), as `codex exec -s read-only` in a throwaway dir on `machine` (default:
+    here); a subject with path or shell fragments (/ ~ $ ` ENV ...) is refused. provider=grok:
+    grok Imagine via ~/grok-web-mcp on the DGX, refused when imagine_quota shows no capacity.
+    wait_s > 0 waits that long for the files instead."""
+    return _mt(_model_tools.image_generate, prompt, provider=provider, out_dir=out_dir, n=n,
+               size=size or None, machine=machine, wait_s=wait_s)
+
+
+@mcp.tool()
+def video_generate(prompt: str, aspect_ratio: str = "9:16", duration: str = "15s",
+                   refs: list[str] | None = None, provider: str = "grok",
+                   resolution: str = "", audio: str = "on", out_dir: str = "",
+                   wait_s: float = 0) -> dict:
+    """grok Imagine video with native audio (imagine_video, or imagine_video_with_refs when
+    refs are given as image paths on the DGX). Quota is checked first. Returns a job id at
+    once unless wait_s > 0; agent_result(job) gives the mp4 path and post id. Codex CLI has
+    no video generation, so provider=codex is refused."""
+    return _mt(_model_tools.video_generate, prompt, aspect_ratio=aspect_ratio, duration=duration,
+               refs=refs or [], provider=provider, resolution=resolution, audio=audio,
+               out_dir=out_dir, wait_s=wait_s)
+
+
+@mcp.tool()
+def media_quota(machine: str = "") -> dict:
+    """Read-only grok Imagine quota (image and video buckets) from ~/grok-web-mcp."""
+    return _mt(_model_tools.media_quota, machine)
+
+
+@mcp.tool()
+def models_available(machine: str = "all", refresh: bool = False) -> dict:
+    """Which CLIs and models each machine has now (codex version and login, grok models,
+    cursor-agent models, run-model direct CLIs and role table). Cached for 10 minutes."""
+    return _mt(_model_tools.models_available, machine, refresh=refresh)
+
+
 # ---- STUDIO ------------------------------------------------------------------
 # Workman Studio (workman.studio, docs/STUDIO.md): the 2026-09-25 ad-video method
 # as tools for the studio-* crew. Imported per call so a missing optional piece

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Non-Claude model tools from a shell: agents (codex/grok/cursor via run-model),
+# images, videos, quota, models (python -m workman.model_tools). docs/MODEL-TOOLS.md
+set -u
+ROOT=$(CDPATH= cd -- "$(dirname "$0")/.." && pwd)
+if [ -x "$ROOT/.venv/bin/python" ]; then
+  exec "$ROOT/.venv/bin/python" -m workman.model_tools "$@"
+fi
+exec python3 -m workman.model_tools "$@"
