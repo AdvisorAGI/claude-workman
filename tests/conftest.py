@@ -32,6 +32,10 @@ def _blocked_run(cmd, timeout=20, input_text=None, **_kw):
 @pytest.fixture(autouse=True)
 def _no_live_desktop(monkeypatch, tmp_path):
     monkeypatch.setenv("WORKMAN_XTEST", "0")
+    # No display auto-detect either: it would probe the live X server. The
+    # tests in test_display_resolve.py drive it with fakes.
+    monkeypatch.setenv("WORKMAN_DISPLAY_AUTODETECT", "0")
+    monkeypatch.setitem(x11._DISPLAY_STATE, "resolved", True)
     monkeypatch.setenv("WORKMAN_STATE_DIR", str(tmp_path / "wm-state"))
     monkeypatch.setattr(x11, "_xt", lambda: None)
     monkeypatch.setattr(x11, "_run", _blocked_run)

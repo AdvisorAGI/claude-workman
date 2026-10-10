@@ -25,9 +25,19 @@ class AtspiUnavailable(Exception):
     """gi / Atspi typelib is missing. Public functions turn this into a dict."""
 
 
+def _display() -> str:
+    """The live display x11 resolved (it follows a reboot onto a new number);
+    the import-time DISPLAY only if that resolver is unavailable."""
+    try:
+        from . import x11
+        return x11.current_display()
+    except Exception:
+        return DISPLAY
+
+
 def _env() -> dict:
     e = dict(os.environ)
-    e["DISPLAY"] = DISPLAY
+    e["DISPLAY"] = _display()
     return e
 
 

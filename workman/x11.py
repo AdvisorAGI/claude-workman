@@ -10,20 +10,91 @@ import os
 import re
 import shutil
 import subprocess
+import sys
 import tempfile
+import threading
 import time
 
+#: The display every primitive drives. Starts as the configured value (as it
+#: always did) and is replaced on first use by `current_display()`, which
+#: keeps it when it opens and otherwise finds the live desktop by itself
+#: (see workman.display_resolve). Read it through `current_display()`.
 DISPLAY = os.environ.get("WORKMAN_DISPLAY") or os.environ.get("DISPLAY") or ":0"
+
+_DISPLAY_STATE: dict = {"resolved": False, "last_try": 0.0, "logged": None}
+_DISPLAY_LOCK = threading.Lock()
+#: A failed open re-resolves at most this often, so a box with no X at all
+#: does not probe on every action.
+RERESOLVE_MIN_S = 5.0
+_OPEN_FAIL_RE = re.compile(r"(?i)(can'?t|cannot|unable to) open display")
+
+
+def _apply_display(res) -> None:
+    global DISPLAY
+    DISPLAY = res.display
+    if res.xauthority:
+        os.environ["XAUTHORITY"] = res.xauthority
+    key = (res.display, res.xauthority)
+    if _DISPLAY_STATE["logged"] != key:
+        _DISPLAY_STATE["logged"] = key
+        auth = f", XAUTHORITY={res.xauthority}" if res.xauthority else ""
+        print(f"workman: X display {res.display} ({res.source}: {res.reason}{auth})",
+              file=sys.stderr, flush=True)
+
+
+def current_display() -> str:
+    """The display to drive, resolved once on first use."""
+    if _DISPLAY_STATE["resolved"]:
+        return DISPLAY
+    with _DISPLAY_LOCK:
+        if not _DISPLAY_STATE["resolved"]:
+            from . import display_resolve
+            try:
+                _apply_display(display_resolve.resolve())
+            except Exception as exc:  # never let detection break an action
+                print(f"workman: display auto-detect failed ({exc}); using {DISPLAY}",
+                      file=sys.stderr, flush=True)
+            _DISPLAY_STATE["resolved"] = True
+            _DISPLAY_STATE["last_try"] = time.monotonic()
+    return DISPLAY
+
+
+def refresh_display(force: bool = False) -> bool:
+    """Re-resolve after a failed open (Xorg restarted, display renumbered).
+
+    Returns True only when the display actually changed. Rate-limited, and a
+    display that still opens is kept, so a transient error costs one probe.
+    """
+    from . import display_resolve
+    if not display_resolve.autodetect_enabled():
+        return False
+    with _DISPLAY_LOCK:
+        now = time.monotonic()
+        if not force and now - _DISPLAY_STATE["last_try"] < RERESOLVE_MIN_S:
+            return False
+        _DISPLAY_STATE["last_try"] = now
+        _DISPLAY_STATE["resolved"] = True
+        old = DISPLAY
+        try:
+            if display_resolve._probe(old, os.environ.get("XAUTHORITY")):
+                return False
+            _apply_display(display_resolve.resolve())
+        except Exception:
+            return False
+        return DISPLAY != old
 
 
 def _env() -> dict:
     e = dict(os.environ)
-    e["DISPLAY"] = DISPLAY
+    e["DISPLAY"] = current_display()
     return e
 
 
 def _run(cmd: list[str], timeout: int = 20, input_text: str | None = None) -> subprocess.CompletedProcess:
-    return subprocess.run(cmd, env=_env(), capture_output=True, text=True, timeout=timeout, input=input_text)
+    r = subprocess.run(cmd, env=_env(), capture_output=True, text=True, timeout=timeout, input=input_text)
+    if r.returncode != 0 and _OPEN_FAIL_RE.search(r.stderr or "") and refresh_display():
+        r = subprocess.run(cmd, env=_env(), capture_output=True, text=True, timeout=timeout, input=input_text)
+    return r
 
 
 # ---- the persistent channel ------------------------------------------------
@@ -36,7 +107,10 @@ def _run(cmd: list[str], timeout: int = 20, input_text: str | None = None) -> su
 def _xt():
     """The XTest channel for DISPLAY, or None to use the subprocess path."""
     from . import xtest
-    return xtest.channel(DISPLAY)
+    ch = xtest.channel(current_display())
+    if ch is None and xtest.enabled() and refresh_display():
+        ch = xtest.channel(current_display())
+    return ch
 
 
 def _stamp(escape: bool = False) -> None:
@@ -131,11 +205,11 @@ def screenshot(max_dim: int | None = None, region: tuple[int, int, int, int] | N
             pass  # fall through to ffmpeg for this one frame
     _require("ffmpeg")
     w, h = screen_size()
-    vinput = DISPLAY
+    vinput = current_display()
     size = f"{w}x{h}"
     if region:
         rx, ry, rw, rh = region
-        vinput = f"{DISPLAY}+{rx},{ry}"
+        vinput = f"{current_display()}+{rx},{ry}"
         size = f"{rw}x{rh}"
     with tempfile.NamedTemporaryFile(suffix=".png", delete=False) as tmp:
         path = tmp.name

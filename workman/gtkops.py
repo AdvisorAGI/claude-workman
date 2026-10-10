@@ -36,8 +36,13 @@ _CLIPBOARD_HANDOFF_MAX_S = 1.5
 # ---- caller side (runs inside the MCP server) -------------------------------
 def call(op: str, **kwargs) -> dict:
     """Run one GTK op in a fresh subprocess and return its JSON result."""
+    try:  # the live display x11 resolved; follows a reboot onto a new number
+        from . import x11
+        display = x11.current_display()
+    except Exception:
+        display = DISPLAY
     env = dict(os.environ)
-    env["DISPLAY"] = DISPLAY
+    env["DISPLAY"] = display
     env.setdefault("GDK_BACKEND", "x11")
     # Keep the package importable even when it was never pip-installed.
     pkg_parent = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))

@@ -44,7 +44,7 @@ foreign_pointer_motion = x11.foreign_pointer_motion
 
 
 def display_name() -> str:
-    return x11.DISPLAY
+    return x11.current_display()
 
 
 def clipboard_get(selection: str = "clipboard") -> dict:
@@ -136,7 +136,7 @@ def platform_info() -> dict:
     return {
         "backend": "linux_x11",
         "os": "linux",
-        "display": x11.DISPLAY,
+        "display": x11.current_display(),
         "session_type": session or "unknown",
         "wayland": session == "wayland",
         "tools": {name: bool(shutil.which(name))
