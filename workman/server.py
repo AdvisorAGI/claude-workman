@@ -1553,15 +1553,21 @@ def tv_power_off(confirm: bool = False) -> dict:
 
 @mcp.tool()
 def ac(cmd: str = "status") -> dict:
-    """The office Gree AC over the LAN, through the DGX driver ~/bin/ac.
+    """The office Gree AC over the LAN, through the DGX driver ~/bin/ac: every setting the unit has.
 
-    cmd: status | on | off | temp N | mode cool|heat|dry|fan|auto |
-    fan auto|low|mid|high | quiet on|off | cool-quiet [N] | lock N | lock off |
-    lock status | log | help, with N = 16-30 C. `status` is one JSON line
-    (power, mode, set_c, room_c, fan, quiet, lock). A lock resets the setpoint
-    every 60 s while the AC is on and never powers it on; while it is on,
-    temp N retargets it. Read status before changing anything: people also use
-    the remote. Off the DGX: remote(host='dgx', verb='ac', args=[...]).
+    cmd: status [all] | on | off | temp N | mode auto|cool|dry|fan|heat |
+    fan auto|low|mid-low|mid|mid-high|high | turbo on|off | quiet on|off |
+    louver default|swing|up|mid-up|middle|mid-down|down|swing-up|swing-mid-up|swing-middle|swing-mid-down|swing-down |
+    hswing default|swing|left|mid-left|middle|mid-right|right |
+    xfan|health|sleep|light|light-sensor|saving|heat8|fresh-air|anti-direct on|off |
+    set KEY=VALUE ... (same words, several at once: 'set mode=cool fan=low turbo=off temp=26') |
+    cool-quiet [N] | lock N | lock off | lock status | fixed on|off|status | log | help, with N = 16-30 C.
+    `status` is one JSON line with every setting and the lock; `status all` adds the unit's raw fields.
+    Every change prints before/after; a setting this unit model lacks is accepted and changes nothing.
+    A lock resets the setpoint every 60 s while the AC is on and never powers it on; temp N retargets it.
+    With `fixed on` the lock also holds mode, fan, quiet, turbo and both louvers, and an explicit command
+    retargets that profile. Every command is sent silent (no beep). Read status before changing anything:
+    people also use the remote. Off the DGX: remote(host='dgx', verb='ac', args=[...]).
     """
     try:
         return _ac.run(cmd)

@@ -30,9 +30,16 @@ class TestParseCmd:
         assert ac.parse_cmd("temp 26") == ["temp", "26"]
         assert ac.parse_cmd("  lock   off ") == ["lock", "off"]
         assert ac.parse_cmd("cool-quiet") == ["cool-quiet"]
+        assert ac.parse_cmd("louver swing-mid-down") == ["louver", "swing-mid-down"]
+        assert ac.parse_cmd("light-sensor off") == ["light-sensor", "off"]
+        assert ac.parse_cmd("fixed status") == ["fixed", "status"]
+        assert ac.parse_cmd("status all") == ["status", "all"]
+        assert ac.parse_cmd("set mode=cool fan=low temp=26") == ["set", "mode=cool", "fan=low", "temp=26"]
 
     @pytest.mark.parametrize("cmd", ["_loop", "status; rm -rf ~", "temp 26 27", "TEMP 26", "temp ../x",
-                                     "lock $(id)", "x" * 41, "reboot"])
+                                     "lock $(id)", "x" * 201, "reboot", "set", "set fan", "set fan=low x",
+                                     "set fan=$(id)", "set a=b=c", "fan low high", "temp=26",
+                                     "set " + " ".join(["fan=low"] * 13)])
     def test_refuses_everything_else(self, cmd):
         with pytest.raises(ValueError):
             ac.parse_cmd(cmd)

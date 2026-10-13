@@ -6,7 +6,8 @@ the temperature lock (one background `ac _loop` that resets the setpoint every
 60 s while the AC is on and never powers it on). This module only checks the
 command against the driver's public verbs and runs it with no shell, a
 timeout and bounded output, so a tool call cannot reach the internal `_loop`
-verb or pass anything the driver would not accept.
+verb or pass anything the driver would not accept. Only `set` takes several
+KEY=VALUE words; every other verb takes at most one plain word.
 
 The driver exists on the DGX only. Elsewhere the answer names the route:
 remote(host='dgx', verb='ac', args=[...]). WORKMAN_AC_DRIVER overrides the
@@ -21,20 +22,29 @@ import subprocess
 
 DRIVER_ENV = "WORKMAN_AC_DRIVER"
 DGX_HOST = "amg-dgx"
-VERBS = frozenset({"status", "on", "off", "temp", "mode", "fan", "quiet", "cool-quiet", "lock", "log", "help"})
-MAX_CMD = 40
-TIMEOUT_S = 60.0  # the driver's worst case is 5 UDP exchanges x 2 tries x 4 s
+SETTINGS = frozenset({"power", "mode", "fan", "turbo", "quiet", "louver", "hswing", "xfan", "health", "sleep",
+                      "light", "light-sensor", "saving", "heat8", "fresh-air", "anti-direct"})
+VERBS = SETTINGS | {"status", "on", "off", "temp", "set", "cool-quiet", "lock", "fixed", "log", "help"}
+MAX_CMD = 200
+MAX_SET = 12
+TIMEOUT_S = 60.0  # the driver's worst case is 5 UDP exchanges x 3 tries x 3 s
 MAX_OUTPUT = 4000
-_TOKEN = re.compile(r"[a-z0-9-]{1,12}")
+_TOKEN = re.compile(r"[a-z0-9-]{1,16}")
+_PAIR = re.compile(r"[a-z0-9-]{1,16}=[a-z0-9-]{1,16}")
 
 
 def parse_cmd(cmd: str) -> list[str]:
-    """'temp 26' -> ['temp', '26']; ValueError unless it is one public driver verb plus at most one plain word."""
+    """'temp 26' -> ['temp', '26']; ValueError unless it is one public driver verb plus at most one plain word,
+    or `set` plus 1-12 KEY=VALUE words ('set fan=low turbo=off')."""
     if not isinstance(cmd, str) or len(cmd) > MAX_CMD:
         raise ValueError(f"cmd must be a string of at most {MAX_CMD} characters")
     argv = cmd.split() or ["status"]
     if argv[0] not in VERBS:
         raise ValueError(f"unknown ac command {argv[0][:20]!r}; one of {', '.join(sorted(VERBS))}")
+    if argv[0] == "set":
+        if not 1 <= len(argv) - 1 <= MAX_SET or not all(_PAIR.fullmatch(a) for a in argv[1:]):
+            raise ValueError(f"set takes 1-{MAX_SET} KEY=VALUE words, e.g. 'set mode=cool fan=low temp=26'")
+        return argv
     if len(argv) > 2 or not all(_TOKEN.fullmatch(a) for a in argv):
         raise ValueError("ac takes a verb and at most one plain argument, e.g. 'temp 26' or 'lock off'")
     return argv
